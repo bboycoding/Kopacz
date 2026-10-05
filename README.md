@@ -1,4 +1,4 @@
-# Mój Kopacz
+# Kopacz Julci
 
 Program do automatycznego kopania na stoniarkach w Minecrafcie. Działa na kilku oknach gry jednocześnie. Postać trzyma lewy przycisk myszy (kopie), idzie w prawo o ustaloną liczbę bloków, a potem wraca w lewo, cały czas kopiąc. Robi tak w kółko, bez Twojej obsługi, nawet przez kilka godzin.
 

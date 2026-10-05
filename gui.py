@@ -50,7 +50,7 @@ class WindowRow:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Mój Kopacz")
+        self.title("Kopacz Julci")
         self.geometry("900x660")
         self.minsize(820, 600)
 
