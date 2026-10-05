@@ -4,13 +4,37 @@ Program do automatycznego kopania na stoniarkach w Minecrafcie. Działa na kilku
 
 > ⚠️ Zanim zaczniesz, sprawdź regulamin serwera. Na wielu serwerach makra AFK są zakazane i grozi za nie ban.
 
-**Wymagania:** Windows 10 lub 11 i Python 3.10 albo nowszy.
+**Wymagania:** Windows 10 lub 11.
+
+Program możesz uruchomić na dwa sposoby:
+- **Sposób A: gotowy plik `.exe`** (polecany). Nic nie instalujesz, wystarczy pobrać jeden plik.
+- **Sposób B: z kodu źródłowego.** Potrzebny jest Python. Przydaje się, gdy chcesz zmieniać program albo sposób A nie działa.
 
 ---
 
-## 1. Instalacja Pythona (jednorazowo)
+## Sposób A: gotowy program (.exe)
 
-1. Wejdź na **https://www.python.org/downloads/** i kliknij żółty przycisk **Download Python 3.x.x**.
+### 1. Pobranie
+1. Wejdź na **https://github.com/bboycoding/Kopacz/releases/latest**.
+2. W sekcji **Assets** kliknij **`MojKopacz.exe`**, żeby go pobrać.
+3. Utwórz na komputerze osobny folder, np. `Pulpit\Kopacz`, i przenieś do niego pobrany plik. Program zapisuje ustawienia w pliku `config.json` obok siebie, więc najlepiej, żeby miał własny folder.
+
+### 2. Uruchomienie
+1. Kliknij dwa razy **`MojKopacz.exe`**.
+2. Przy pierwszym uruchomieniu Windows może pokazać niebieskie okno **„System Windows ochronił ten komputer”**. Program nie ma płatnego podpisu cyfrowego, dlatego Windows go nie zna. Kliknij **Więcej informacji**, a potem **Uruchom mimo to**. Zrobisz to tylko raz.
+3. Pierwsze uruchomienie może potrwać kilka sekund, bo program się rozpakowuje.
+
+Gdy wyjdzie nowa wersja, pobierz nowy `MojKopacz.exe` i podmień stary plik w tym samym folderze. Ustawienia (`config.json`) zostaną.
+
+Przejdź teraz do punktu **[5. Przygotowanie Minecrafta](#5-przygotowanie-minecrafta-za-każdym-razem)**.
+
+---
+
+## Sposób B: uruchomienie z kodu (Python)
+
+### 1. Instalacja Pythona (jednorazowo)
+
+1. Wejdź na **https://www.python.org/downloads/** i kliknij żółty przycisk **Download Python 3.x.x** (potrzebny jest Python 3.10 albo nowszy).
 2. Uruchom pobrany instalator.
 3. **WAŻNE:** na pierwszym ekranie instalatora zaznacz na dole pole **„Add python.exe to PATH”**.
 4. Kliknij **Install Now** i poczekaj, aż instalacja się skończy.
@@ -23,14 +47,18 @@ Program do automatycznego kopania na stoniarkach w Minecrafcie. Działa na kilku
    - Jeśli pojawi się np. `Python 3.12.4`, wszystko jest OK.
    - Jeśli pojawi się błąd albo otworzy się Microsoft Store, to znaczy, że przy instalacji nie zaznaczyłeś „Add python.exe to PATH”. Uruchom instalator jeszcze raz, wybierz **Modify**, a potem **Next** i zaznacz **„Add Python to environment variables”**.
 
-## 2. Pobranie programu
+### 2. Pobranie programu z GitHuba
 
-1. Pobierz folder `moj_kopacz`. Jeśli dostałeś go jako plik `.zip`, kliknij go prawym przyciskiem myszy i wybierz **Wyodrębnij wszystkie…**.
-2. Wypakowany folder możesz zostawić w dowolnym miejscu, np. na Pulpicie.
+1. Wejdź na **https://github.com/bboycoding/Kopacz**.
+2. Kliknij zielony przycisk **Code**, a potem **Download ZIP**.
+3. Kliknij pobrany plik `Kopacz-main.zip` prawym przyciskiem myszy i wybierz **Wyodrębnij wszystkie…**.
+4. Wypakowany folder `Kopacz-main` możesz zostawić w dowolnym miejscu, np. na Pulpicie.
 
-## 3. Instalacja potrzebnych bibliotek (jednorazowo)
+> Jeśli znasz Gita, możesz zamiast tego wpisać `git clone https://github.com/bboycoding/Kopacz.git`. Później aktualizujesz program komendą `git pull`.
 
-1. Otwórz folder `moj_kopacz` w Eksploratorze plików.
+### 3. Instalacja potrzebnych bibliotek (jednorazowo)
+
+1. Otwórz folder programu w Eksploratorze plików.
 2. Kliknij w pasek adresu u góry okna, wpisz `cmd` i wciśnij Enter. Otworzy się konsola od razu w tym folderze.
 3. Wpisz:
    ```
@@ -38,14 +66,16 @@ Program do automatycznego kopania na stoniarkach w Minecrafcie. Działa na kilku
    ```
 4. Poczekaj, aż instalacja się skończy. Instalują się dwie biblioteki: `customtkinter` (okno programu) i `pywin32` (sterowanie oknami Minecrafta).
 
-## 4. Uruchomienie programu
+### 4. Uruchomienie programu
 
-W konsoli otwartej w folderze `moj_kopacz` wpisz:
+Kliknij dwa razy plik **`start.bat`** w folderze programu. Jeśli program się nie uruchomi, okno konsoli zostanie otwarte i będzie widać w nim komunikat błędu.
+
+Możesz też w konsoli otwartej w folderze programu wpisać:
 ```
 python main.py
 ```
 
-**Wygodniej:** w folderze programu jest plik **`start.bat`**. Wystarczy go dwukrotnie kliknąć. Jeśli program się nie uruchomi, okno konsoli zostanie otwarte i będzie widać w nim komunikat błędu.
+**Własny plik .exe:** kliknij dwa razy **`build.bat`**. Po około minucie gotowy program pojawi się w folderze `dist` jako `MojKopacz.exe` i możesz go przenieść, gdzie chcesz (razem z `config.json`).
 
 ## 5. Przygotowanie Minecrafta (za każdym razem)
 
@@ -97,7 +127,7 @@ Program mierzy odległość czasem, a nie liczbą bloków. Dlatego trzeba raz sp
 | Rozrzut czasu ±[%] | Losowa zmiana długości każdego przejścia | 0 |
 | Metoda inputu | „W tle” (wszystkie okna naraz) albo „Pierwszy plan” (po kolei) | W tle |
 
-Ustawienia zapisują się w pliku `config.json` w folderze programu.
+Ustawienia zapisują się w pliku `config.json` obok programu (obok `MojKopacz.exe` albo w folderze z kodem).
 
 ### Kopanie przez kilka godzin bez przesuwania się postaci
 Przy każdym przejściu postać może przejść odrobinę za dużo albo za mało. Po kilku godzinach takie drobne różnice mogą się zsumować i postać zjedzie ze swojego miejsca. Jak temu zapobiec:
@@ -108,11 +138,12 @@ Przy każdym przejściu postać może przejść odrobinę za dużo albo za mało
 
 | Problem | Rozwiązanie |
 |---|---|
-| `'python' is not recognized…` | Python nie jest dodany do PATH, wróć do kroku 1.5 |
-| `No module named 'customtkinter'` / `'win32api'` | Nie zostały zainstalowane biblioteki, wykonaj krok 3 |
+| „System Windows ochronił ten komputer” | Kliknij **Więcej informacji** → **Uruchom mimo to** (sposób A, krok 2) |
+| `'python' is not recognized…` | Python nie jest dodany do PATH, wróć do sposobu B, krok 1.5 |
+| `No module named 'customtkinter'` / `'win32api'` | Nie zostały zainstalowane biblioteki, wykonaj sposób B, krok 3 |
 | Lista okien jest pusta | Uruchom grę (nie sam launcher) i kliknij **Odśwież** |
 | Postać stoi albo gra pokazuje menu pauzy | Wciśnij F3+P w tym oknie i zamknij menu |
 | Postać chodzi, ale nie kopie | Kliknij w okno gry (nie może być otwartego menu ani ekwipunku); jeśli to nie pomoże, użyj metody „Pierwszy plan” |
 | Postać przechodzi za daleko lub za mało | Zrób kalibrację jeszcze raz (punkt 6) |
-| F8 nie działa | Inny program zajął już klawisz F8 (program pokaże o tym komunikat), wtedy używaj przycisku **Stop wszystkie** |
+| F8 nie działa | Inny program zajął już klawisz F8 (program pokaże o tym komunikat). Najczęściej to druga, wcześniej uruchomiona kopia Kopacza, więc ją zamknij. W ostateczności używaj przycisku **Stop wszystkie** |
 | Grasz na innych klawiszach niż WASD | Wpisz swoje klawisze ruchu w pola „Klawisz w prawo/w lewo”; obsługiwane są litery, cyfry oraz `SPACE`, `SHIFT`, `CTRL`, `LEFT`, `RIGHT`, `UP`, `DOWN` |

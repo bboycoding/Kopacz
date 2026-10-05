@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Instalacja: `python -m pip install -r requirements.txt`
 - Uruchomienie: `python main.py`
-- Exe (opcjonalnie): `pyinstaller --onefile --windowed --name MojKopacz main.py` — `config.json` jest wtedy obok exe (`config.BASE_DIR`).
+- Exe: `build.bat` → `dist\MojKopacz.exe` (PyInstaller `--onefile --windowed --collect-data customtkinter`; bez `--collect-data` exe nie znajdzie motywów customtkinter). `config.json` jest wtedy obok exe (`config.BASE_DIR`). `build.bat` musi zostać ASCII + CRLF, inaczej cmd go źle parsuje.
 - Brak testów automatycznych; logikę `Miner` da się sprawdzić bez MC, podmieniając `miner.make_sender` na atrapę nagrywającą wywołania.
 
 ## Architektura
