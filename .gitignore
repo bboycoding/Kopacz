@@ -1,0 +1,5 @@
+# Pliki generowane przez Pythona i PyInstaller (build.bat)
+__pycache__/
+build/
+dist/
+*.spec
