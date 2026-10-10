@@ -7,8 +7,8 @@ python -m PyInstaller --version >nul 2>&1 || python -m pip install pyinstaller |
 rem customtkinter wczytuje w trakcie dzialania swoje motywy (.json) i fonty - trzeba je dolaczyc.
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name MojKopacz --collect-data customtkinter main.py || goto :error
 
-rem Ustawienia leza obok exe (config.BASE_DIR). Kopiujemy obecne, jesli w dist jeszcze ich nie ma.
-if exist config.json if not exist dist\config.json copy config.json dist\config.json >nul
+rem Ustawienia (config.json) i zaszyfrowane sekrety (secrets.json) program tworzy sam obok exe (config.BASE_DIR).
+rem Nie kopiujemy tu prywatnych plikow - exe ma trafiac do innych osob bez Twoich kont i hasel.
 
 echo.
 echo Gotowe: dist\MojKopacz.exe

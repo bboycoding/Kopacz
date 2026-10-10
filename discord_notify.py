@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-USER_AGENT = "MojKopacz/1.2 (+https://github.com/bboycoding/Kopacz)"
+USER_AGENT = "MojKopacz/2.0 (+https://github.com/bboycoding/Kopacz)"
 WEBHOOK_RE = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+/?$")
 MIN_SEND_GAP = 2.0          # s; 30 wiadomości na minutę = 1 na 2 s
 FINAL_FLUSH_S = 3.0         # tyle czasu na wysłanie reszty przy zamykaniu programu

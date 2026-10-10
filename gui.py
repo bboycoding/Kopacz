@@ -28,7 +28,7 @@ from secrets_store import load_secrets, save_secrets
 from win_input import VK_F8, key_to_vk
 from windows import McWindow, find_minecraft_windows, flash_window
 
-APP_VERSION = "1.2"
+APP_VERSION = "2.0"
 BACKEND_LABELS = {
     "postmessage": "W tle (PostMessage)",
     "foreground": "Pierwszy plan (po kolei)",

@@ -4,26 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Projekt
 
-„Mój Kopacz” — autorski bot AFK do kopania na stoniarkach (blok endu + generujący się stone) w Minecrafcie, w wielu oknach naraz. Cykl: trzyma LPM, idzie klawiszem w prawo przez `bloki × sec_per_block`, pauza, wraca w lewo tyle samo — w pętli. Windows-only (pywin32). Cały interfejs i komunikaty po polsku.
+„Mój Kopacz” — autorski bot AFK do kopania na stoniarkach (blok endu + generujący się stone) w Minecrafcie, w wielu oknach naraz. Cykl: trzyma LPM, idzie klawiszem w prawo przez `bloki × sec_per_block`, pauza, wraca w lewo tyle samo — w pętli. Do tego (opcjonalnie, per konto): komendy na czacie według harmonogramu, samodzielny powrót na serwer po restarcie/rozłączeniu/crashu gry oraz logi i alerty na Discordzie. Windows-only (pywin32). Cały interfejs i komunikaty po polsku. Program jest ogólny (do udostępniania): konta, profile serwerów, komendy i wzorce logu ustawia się w GUI, a bfsmc.pl jest tylko presetem (`presets.py`).
 
 ## Komendy
 
-- Instalacja: `python -m pip install -r requirements.txt`
+- Instalacja: `python -m pip install -r requirements.txt` (customtkinter, pywin32, psutil)
 - Uruchomienie: `python main.py`
-- Exe: `build.bat` → `dist\MojKopacz.exe` (PyInstaller `--onefile --windowed --collect-data customtkinter`; bez `--collect-data` exe nie znajdzie motywów customtkinter). `config.json` jest wtedy obok exe (`config.BASE_DIR`). `build.bat` musi zostać ASCII + CRLF, inaczej cmd go źle parsuje.
-- Brak testów automatycznych; logikę `Miner` da się sprawdzić bez MC, podmieniając `miner.make_sender` na atrapę nagrywającą wywołania.
+- Exe: `build.bat` → `dist\MojKopacz.exe` (PyInstaller `--onefile --windowed --collect-data customtkinter`; bez `--collect-data` exe nie znajdzie motywów customtkinter). `config.json` i `secrets.json` powstają wtedy obok exe (`config.BASE_DIR`); build nie kopiuje prywatnych plików. `build.bat` musi zostać ASCII + CRLF, inaczej cmd go źle parsuje.
+- Brak testów automatycznych w repo. Logikę da się sprawdzić bez Minecrafta, podmieniając na atrapy nagrywające wywołania: `miner.make_sender`, w `Account`/`Rejoiner` parametry `sender_factory`, `menu_factory`, `connected`, `window_alive`, `restarter`, a `windows.is_alive`/`chat.is_alive` przez przypisanie. Czasy (`accounts.TICK`, `rejoin.TICK`, `SETTLE_S` itd.) są stałymi modułów, więc w testach można je skrócić.
+- Diagnostyka z konsoli: `python devtools.py` (instances, replay, tail, discord-test, chat, keys, pause-test, relaunch). `chat`, `keys`, `pause-test` i `relaunch --yes` wysyłają PRAWDZIWE akcje do gry; `relaunch` bez `--yes` tylko pokazuje plan.
 
 ## Architektura
 
-- `windows.py` — wykrywanie okien gry po klasie (`GLFW30` dla 1.13+, `LWJGL` dla 1.8–1.12), fallback po tytule `^Minecraft` bez launcherów.
+- `windows.py` — wykrywanie okien gry po klasie (`GLFW30` dla 1.13+, `LWJGL` dla 1.8–1.12), fallback po tytule `^Minecraft` bez launcherów. `is_connected(hwnd)`: tytuł GLFW zawiera „Multiplayer”/„Singleplayer” tylko w świecie; okna LWJGL mają stały tytuł, więc dla nich zawsze True.
 - `win_input.py` — dwa backendy o wspólnym interfejsie (`session()`, `key_down/up`, `lmb_down/up`, `hold_tick`, `release_all`):
-  - `PostMessageBackend` — `WM_KEYDOWN/UP` i `WM_LBUTTONDOWN/UP` do okna w tle; wszystkie okna naprawdę równolegle. lParam musi zawierać scan code (bity 16–23), bo GLFW mapuje klawisze po scan code, nie po VK.
+  - `PostMessageBackend` — `WM_KEYDOWN/UP` i `WM_LBUTTONDOWN/UP` do okna w tle; wszystkie okna naprawdę równolegle. lParam musi zawierać scan code (bity 16–23), bo GLFW mapuje klawisze po scan code, nie po VK. Klawisze rozszerzone (strzałki, Home…) wymagają bitu 24 (`EXTENDED_VKS`), inaczej GLFW czyta je jako numeryczne. `type_text` wysyła `WM_CHAR` (polskie znaki, para surogatów dla emoji); `tap()` to wciśnięcie i puszczenie.
   - `ForegroundBackend` — `SetForegroundWindow` + `keybd_event`/`mouse_event`; globalny `_FOREGROUND_LOCK` sprawia, że przy wielu oknach odcinki ruchu idą po kolei. Input fizyczny wysyłany tylko wewnątrz `session()`; `lmb_down` poza sesją tylko zapamiętuje intencję.
-- `miner.py` — `Miner(threading.Thread)` na okno; `_hold()` trzyma klawisz w kawałkach co `HOLD_TICK` (stop reaguje szybko). `finally` zawsze woła `release_all()` — nie usuwać, inaczej postać zostaje z wciśniętym klawiszem. Nie nazywać atrybutu `_stop` (koliduje z `threading.Thread._stop`).
-- `gui.py` — customtkinter; wątki kopaczy nigdy nie dotykają widgetów — GUI odpytuje `miner.status/cycles/runtime` w `_tick()` co 500 ms. Skrót F8 (`hotkey.py`, `RegisterHotKey` + własna pętla komunikatów w wątku) tylko ustawia eventy/stop, resztę robi `_tick()`.
-- `config.py` — dataclass `Config` ↔ `config.json`; uszkodzony plik → wartości domyślne. `validate()` trzyma zakresy pól.
+  - Czat i klawisze menu zawsze idą przez PostMessage (`chat.py`), także gdy ruch jest w trybie foreground.
+- `miner.py` — `Miner(threading.Thread)` na okno; `_hold()` trzyma klawisz w kawałkach co `HOLD_TICK` (stop i pauza reagują szybko). `pause()` czeka na `_paused_ack` (klawisze i LPM puszczone), `resume()` zaczyna cykl od nowa, `paused_for()` to kontekst. `finally` zawsze woła `release_all()` — nie usuwać, inaczej postać zostaje z wciśniętym klawiszem. Nie nazywać atrybutu `_stop` (koliduje z `threading.Thread._stop`). `note` to komunikat z zewnątrz pokazywany w GUI zamiast statusu. Przy `keep_alive_without_window` (ustawia App, gdy rejoin włączony) zniknięcie okna nie kończy wątku: kopacz czeka na `rebind(window)`.
+- `config.py` — dataclass `Config` ↔ `config.json` (lokalny, w `.gitignore`; wzorem jest `config.example.json`). Sekcje: kopanie (płaskie pola), `launcher`, `discord`, `rejoin`, `servers` (`ServerProfile`), `accounts` (`AccountCfg` z `schedule` = `ChatCommand`). `validate()` trzyma zakresy pól i sprawdza regexy. Zapis atomowy; nieznane pola są zachowywane (`extra`); uszkodzony plik trafia do `config.json.bad` i `load_error` (GUI pokazuje komunikat), nie jest po cichu gubiony. W GUI zawsze `dataclasses.replace(self.cfg, …)`, nigdy nowy `Config(...)` z podzbiorem pól — inaczej zapis z ekranu kopania skasuje konta i serwery.
+- `secrets_store.py` — webhook Discorda, ID do pingów i hasła kont w `secrets.json`, szyfrowane Windows DPAPI (tylko ten użytkownik i ten komputer). Hasło wolno wstawiać wyłącznie w `{password}` komendy logowania i nigdy nie wolno go emitować do statusów, logów ani na Discorda (`mask()`).
+- `launcher.py` — wykrywanie launchera (Prism/Fjord/PolyMC/MultiMC), instancje, okno → instancja po `-Djava.library.path=…/<id>/natives` z linii poleceń `javaw`. Restart: `find_instance_processes` zwraca tylko procesy JEDNEJ instancji, `close_instance` zamyka łagodnie (`WM_CLOSE`), potem `terminate`/`kill`; `GameRestarter` + `launch_instance` (szablon `-l {instance} -s {server} -a {nick}`, każdy token podstawiany osobno).
+- `log_watcher.py` — `classify()` zamienia linię `latest.log` na zdarzenie (ogólne dla MC: Connecting to, Client disconnected, Stopping!; zależne od serwera: wzorce `ServerProfile.pat_*`; czat graczy nigdy nie wywołuje zdarzeń). `LogTail` czyta log co 0,5 s i NIE trzyma pliku otwartego między odczytami — otwarty uchwyt blokowałby grze rotację `latest.log` w Windows.
+- `monitor.py` — `LogTail` per konto + filtr include/exclude + wspólny `DiscordNotifier`; `listeners` dostarczają zdarzenia do nadzorców kont.
+- `discord_notify.py` — jeden wątek i kolejka na cały program: paczkowanie linii, alerty zbiorcze, ping tylko przy BŁĘDZIE/banie, ponawianie po 429, walidacja adresu webhooka. Awaria Discorda nie może zatrzymać reszty.
+- `accounts.py` — `Account(threading.Thread)`: nadzorca konta (jeden wątek na konto). Wszystko poza ruchem (czat, menu, rejoin) robi ten wątek, więc dwie rzeczy nigdy nie piszą naraz do tego samego okna. Harmonogram komend (`on_missed`: `defer`/`skip`), „Wyślij teraz”. Wywołania zwrotne do GUI/Discorda są w `try/except` — ich błąd nie może zabić wątku.
+- `chat.py` — `ChatSender` (klawisz czatu → Backspace → `WM_CHAR` → Enter; odmawia wysyłki, gdy okno nie jest połączone, bo Enter w menu kliknąłby przycisk) i `MenuNavigator` (tokeny `TAB`, `ENTER`, `wait:N`…).
+- `rejoin.py` — `Rejoiner` (działa w wątku `Account`) i `RejoinGate`. Poziom 0: lobby → komendy z profilu → wzorzec „wejście do gry”. Poziom 1: rozłączenie → klawisze menu → „Connecting to” (sprawdzenie adresu) → komenda logowania → poziom 0. Poziom 2: restart instancji (ostateczność lub zniknięcie okna), `on_rebind` przepina kopacza. Ponawianie z backoffem, po wyczerpaniu BŁĄD + alert z pingiem raz + opcjonalnie `slow_retry`. Zdarzenia z jednego obrotu pętli muszą zostać w buforze (`_pending`), nie wolno ich gubić. Wszystkie czekania przez `Event.wait(stop)`.
+- `gui.py` + `gui_tabs/` — customtkinter; zakładki Kopanie / Konta / Serwer / Discord / Zaawansowane. Wątki kopaczy, nadzorców i Discorda nigdy nie dotykają widgetów — GUI odpytuje `miner.status/note/cycles/runtime` w `_tick()` co 500 ms; wyniki z wątków wracają przez `self.after(0, …)`. Skrót F8 (`hotkey.py`, `RegisterHotKey` + własna pętla komunikatów w wątku) tylko ustawia eventy/stop. Po restarcie instancji `_rekey_window` przepina klucze `miners`/`runners` (kluczem jest hwnd) w wątku GUI.
 
 ## Uwagi dot. gry
 
 - W każdym oknie MC trzeba wcisnąć F3+P (brak pauzy po utracie fokusu) i mieć złapaną mysz (bez otwartego menu), inaczej w trybie PostMessage gra ignoruje atak.
 - Dystans jest czasowy: `sec_per_block` kalibrowany w GUI („idź 10 bloków” → „Przelicz”). `wall_push_pct` > 0 dociąga postać do ścian na końcach toru, co eliminuje dryf przy wielogodzinnej pracy; `jitter_pct` bez ścian powoduje dryf (błądzenie losowe).
+- Na bfsmc.pl restart trybu gry to przeniesienie do lobby przez proxy (`Rozłączono z skyblock: …`), klient zostaje połączony; prawdziwe rozłączenie to `Client disconnected with reason: …`. Po wejściu do trybu postać jest od razu na miejscu, więc po powrocie nie wpisujemy `/home`.
+- Sekwencja klawiszy menu po rozłączeniu zależy od wersji gry i zaznaczonego serwera; nie była sprawdzona na żywo — weryfikować `devtools keys` na jednym koncie.
+
+## Pliki prywatne
+
+- `config.json` i `secrets.json` są poza gitem; nie commitować ich ani nie kopiować do `dist`. Wzorem jest `config.example.json`.

@@ -2,7 +2,14 @@
 
 Program do automatycznego kopania na stoniarkach w Minecrafcie. Działa na kilku oknach gry jednocześnie. Postać trzyma lewy przycisk myszy (kopie), idzie w prawo o ustaloną liczbę bloków, a potem wraca w lewo, cały czas kopiąc. Robi tak w kółko, bez Twojej obsługi, nawet przez kilka godzin.
 
-> ⚠️ Zanim zaczniesz, sprawdź regulamin serwera. Na wielu serwerach makra AFK są zakazane i grozi za nie ban.
+Oprócz samego kopania program potrafi (każdą z tych rzeczy włączasz osobno, w zakładkach okna):
+- **wysyłać komendy na czacie** według harmonogramu, osobno dla każdego konta,
+- **samodzielnie wracać na serwer** po restarcie serwera (przeniesienie do lobby), po rozłączeniu, a w ostateczności po restarcie samej instancji gry,
+- **przesyłać logi i alerty na Discorda** przez webhook, żebyś mógł zdalnie sprawdzać, co się dzieje.
+
+Nic nie jest przypisane do jednego serwera: konta, profile serwerów, komendy (`/login`, `/server skyblock`…) i wzorce logu ustawiasz w programie. Opis jest w sekcji [8](#8-konta-serwer-i-powrót-na-serwer-opcjonalnie).
+
+> ⚠️ Zanim zaczniesz, sprawdź regulamin serwera. Na wielu serwerach makra AFK są zakazane i grozi za nie ban. Automatyczne wracanie na serwer i komendy według harmonogramu zwiększają ryzyko, że bot zostanie zauważony.
 
 **Wymagania:** Windows 10 lub 11.
 
@@ -17,14 +24,14 @@ Program możesz uruchomić na dwa sposoby:
 ### 1. Pobranie
 1. Wejdź na **https://github.com/bboycoding/Kopacz/releases/latest**.
 2. W sekcji **Assets** kliknij **`MojKopacz.exe`**, żeby go pobrać.
-3. Utwórz na komputerze osobny folder, np. `Pulpit\Kopacz`, i przenieś do niego pobrany plik. Program zapisuje ustawienia w pliku `config.json` obok siebie, więc najlepiej, żeby miał własny folder.
+3. Utwórz na komputerze osobny folder, np. `Pulpit\Kopacz`, i przenieś do niego pobrany plik. Program zapisuje ustawienia w pliku `config.json`, a hasła i adres webhooka Discorda w zaszyfrowanym pliku `secrets.json`, oba obok siebie, więc najlepiej, żeby miał własny folder.
 
 ### 2. Uruchomienie
 1. Kliknij dwa razy **`MojKopacz.exe`**.
 2. Przy pierwszym uruchomieniu Windows może pokazać niebieskie okno **„System Windows ochronił ten komputer”**. Program nie ma płatnego podpisu cyfrowego, dlatego Windows go nie zna. Kliknij **Więcej informacji**, a potem **Uruchom mimo to**. Zrobisz to tylko raz.
 3. Pierwsze uruchomienie może potrwać kilka sekund, bo program się rozpakowuje.
 
-Gdy wyjdzie nowa wersja, pobierz nowy `MojKopacz.exe` i podmień stary plik w tym samym folderze. Ustawienia (`config.json`) zostaną.
+Gdy wyjdzie nowa wersja, pobierz nowy `MojKopacz.exe` i podmień stary plik w tym samym folderze. Ustawienia (`config.json`) i sekrety (`secrets.json`) zostaną.
 
 Przejdź teraz do punktu **[5. Przygotowanie Minecrafta](#5-przygotowanie-minecrafta-za-każdym-razem)**.
 
@@ -64,7 +71,7 @@ Przejdź teraz do punktu **[5. Przygotowanie Minecrafta](#5-przygotowanie-minecr
    ```
    python -m pip install -r requirements.txt
    ```
-4. Poczekaj, aż instalacja się skończy. Instalują się dwie biblioteki: `customtkinter` (okno programu) i `pywin32` (sterowanie oknami Minecrafta).
+4. Poczekaj, aż instalacja się skończy. Instalują się trzy biblioteki: `customtkinter` (okno programu), `pywin32` (sterowanie oknami Minecrafta i szyfrowanie haseł) oraz `psutil` (rozpoznawanie, która instancja gry to które okno).
 
 ### 4. Uruchomienie programu
 
@@ -127,12 +134,88 @@ Program mierzy odległość czasem, a nie liczbą bloków. Dlatego trzeba raz sp
 | Rozrzut czasu ±[%] | Losowa zmiana długości każdego przejścia | 0 |
 | Metoda inputu | „W tle” (wszystkie okna naraz) albo „Pierwszy plan” (po kolei) | W tle |
 
-Ustawienia zapisują się w pliku `config.json` obok programu (obok `MojKopacz.exe` albo w folderze z kodem).
+Ustawienia zapisują się w pliku `config.json` obok programu (obok `MojKopacz.exe` albo w folderze z kodem). Gdy plik się uszkodzi, program nie nadpisuje go po cichu: kopiuje go do `config.json.bad`, pokazuje komunikat i startuje z ustawieniami domyślnymi.
 
 ### Kopanie przez kilka godzin bez przesuwania się postaci
 Przy każdym przejściu postać może przejść odrobinę za dużo albo za mało. Po kilku godzinach takie drobne różnice mogą się zsumować i postać zjedzie ze swojego miejsca. Jak temu zapobiec:
 - Jeśli rząd stoniarek ma **ścianę na obu końcach**, ustaw **Dociąg do ściany** na **10–15%**. Postać przy każdej zawrotce opiera się o ścianę i wraca dokładnie w to samo miejsce.
 - **Rozrzut czasu** ustawiaj tylko razem z dociągiem do ściany. Bez ścian rozrzut sprawi, że postać szybciej zjedzie z toru.
+
+## 8. Konta, serwer i powrót na serwer (opcjonalnie)
+
+Ta część jest potrzebna tylko do komend na czacie, powrotu na serwer i Discorda. Samo kopanie (punkty 5–7) działa bez niej. Wszystko ustawiasz w zakładkach u góry okna programu; nic nie trzeba edytować w plikach.
+
+### 8.1 Launcher i konta
+
+1. Zakładka **Zaawansowane → Launcher → Wykryj → Zapisz**. Program obsługuje launchery oparte na MultiMC (**Prism, Fjord, PolyMC, MultiMC**): rozpoznaje instancje i wie, które okno gry należy do której instancji, więc konto nie ginie, gdy okno dostanie nowy numer po restarcie gry. Szablon argumentów uruchomienia (`-l {instance} -s {server} -a {nick}`) został sprawdzony na Fjord Launcherze (`--help`). Przy innym launcherze sprawdź jego `--help` i popraw szablon.
+2. Zakładka **Konta → Dodaj konto** (albo przycisk **+ Konto** przy oknie na liście kopania). Wypełnij: instancję, nick w grze, profil serwera, hasło do logowania na serwerze (opcjonalnie) i, jeśli chcesz, harmonogram komend. Pole „Komenda po powrocie na serwer” zostaw puste, jeśli po wejściu do trybu postać jest od razu na miejscu.
+
+### 8.2 Profil serwera
+
+Zakładka **Serwer**: kliknij **+ bfsmc.pl (przykład)** (gotowy przykład) albo **+ Pusty profil** i uzupełnij:
+
+| Pole | Do czego służy |
+|---|---|
+| Adres serwera | Sprawdzenie, czy gra łączy z właściwym serwerem, i restart instancji (`-s`) |
+| Komenda logowania | Np. `/login {password}`. Znacznik `{password}` zamieniany jest na hasło konta. Puste = serwer bez logowania |
+| Komendy z lobby do gry | Np. `/server skyblock`. Wpisywane po przeniesieniu do lobby |
+| Wzorce logu | Fragmenty linii z `latest.log`, po których bot rozpoznaje: prośbę o logowanie, zalogowanie, lobby, wejście do gry, przeniesienie do lobby i ban. To wyrażenia regularne |
+
+Przycisk **Wybierz log i sprawdź…** przepuszcza wskazany `latest.log` (albo spakowany `.log.gz` ze starych sesji) przez Twoje wzorce i pokazuje, ile zdarzeń wykryto, z przykładowymi liniami. Dzięki temu dopasujesz bota do swojego serwera bez zgadywania. Linie czatu graczy (wzorzec „Czat graczy”) nigdy nie wywołują zdarzeń, więc nikt nie wymusi na bocie powrotu, wpisując na czacie np. „Rozłączono z lobby”.
+
+### 8.3 Komendy według harmonogramu
+
+W oknie konta, sekcja **Harmonogram komend na czacie**: wpisz komendę, co ile minut ma być wysyłana (minimum 0,1 min) i losowy rozrzut w sekundach (żeby kilka kont nie pisało w tej samej sekundzie). **Teraz** wysyła komendę od razu, bez zapisywania.
+
+- Komenda wychodzi tylko wtedy, gdy konto kopie i okno jest połączone z serwerem. Na chwilę wstrzymuje ruch, wpisuje komendę przez klawisz czatu (domyślnie `T`, zmienisz go w **Zaawansowane → Czat i komendy**) i wznawia kopanie.
+- **Gdy przegapiona:** jeśli termin minie, kiedy konto nie kopało (np. trwał powrót na serwer), **Odłóż** wysyła komendę raz po powrocie (po 60 s nieprzerwanego kopania, bez nadrabiania zaległości), a **Pomiń** czeka na kolejny termin.
+- Limit gry to 256 znaków. Po otwarciu czatu program naciska jeszcze Backspace, żeby usunąć ewentualną zbędną literę „t”.
+
+### 8.4 Powrót na serwer
+
+Włącz w **Zaawansowane → Powrót na serwer** (zaznacz pole, **Zapisz**). Obowiązuje od następnego startu kopania na koncie. Potrzebujesz: konta przypisanego do instancji, profilu serwera z komendami lobby i wzorcami, hasła konta (jeśli serwer wymaga logowania) i, dla restartu gry, ustawionego launchera.
+
+| Sytuacja | Co robi program |
+|---|---|
+| **Przeniesienie do lobby** (np. restart trybu gry) | Natychmiast wstrzymuje kopanie. Po krótkiej pauzie wpisuje komendy lobby → gra z profilu, czeka na wzorzec „wejście do gry” i wznawia kopanie. Bez potwierdzenia ponawia z rosnącym odstępem (domyślnie 10, 20, 40, 80, 160, 300 s) |
+| **Rozłączenie** (np. Timed out) | Wstrzymuje kopanie, naciska klawisze w menu (domyślnie `TAB, ENTER, wait:2, ENTER`), czeka na połączenie z właściwym serwerem, wpisuje komendę logowania z hasłem, a po wejściu do lobby wraca jak wyżej. Gdy serwer loguje sam, pomija logowanie |
+| **Nic nie pomaga albo okno gry zniknęło** (crash) | Ostateczność: zamyka **tylko proces tej jednej instancji** (najpierw łagodnie, po 20 s siłą), uruchamia ją przez launcher, przepina kopacza na nowe okno i czeka na wejście na serwer |
+| **Ban** | Tylko wstrzymanie i alert, bez ponawiania |
+| **Wyczerpane próby** | Konto przechodzi w stan BŁĄD, kopanie jest wstrzymane, a Ty dostajesz **jeden** alert z pingiem i ostatnimi liniami logu. Przy włączonym „wolnym ponawianiu” (domyślnie co 30 min) bot próbuje dalej, bez kolejnych pingów |
+
+Zabezpieczenia: gdy tytuł okna wskazuje, że postać jest w świecie gry, bot **nie naciska klawiszy menu** (Enter w grze mógłby coś zrobić). Po restarcie serwera wszystkie konta wracają **po kolei**, z odstępem co najmniej 10 s. F8 przerywa też powrót. Hasło nigdy nie trafia do komunikatów, logów ani na Discorda.
+
+> ⚠️ Sekwencja klawiszy w menu zależy od wersji gry i od tego, który serwer jest zaznaczony na liście. **Sprawdź ją najpierw na jednym koncie**: przy ekranie „Disconnected” albo w menu wpisz `python devtools.py keys <instancja> TAB ENTER wait:2 ENTER` i zobacz, czy gra dołącza do właściwego serwera. Jeśli trafia gdzie indziej, popraw sekwencję w ustawieniach (np. dodaj `DOWN`). Program sprawdza adres w „Connecting to…” i przy złym serwerze anuluje połączenie.
+
+Do próby prawdziwego rozłączenia tylko jednej instancji użyj programu **TCPView** (Sysinternals): znajdź połączenie procesu `javaw` tej instancji i wybierz **Close Connection**. Pozostałe konta nie zostaną ruszone.
+
+### 8.5 Discord
+
+1. W Discordzie: kanał → **Edytuj kanał → Integracje → Webhooki → Nowy webhook → Kopiuj adres**.
+2. Zakładka **Discord**: zaznacz „Wysyłaj logi i alerty”, wklej adres webhooka, wpisz swoje ID użytkownika (do pingów), **Zapisz**, a potem **Wyślij test**.
+
+Na kanał trafiają: zdarzenia bota (rozłączenie, przeniesienie do lobby, wejście do gry, ban, postęp powrotu, wysłane komendy), linie z nickiem konta oraz linie pasujące do Twoich wzorców „Wysyłaj także”. Wzorce „Nigdy nie wysyłaj” odfiltrowują szum (przykładowy profil bfsmc.pl ustawia je za Ciebie). Linie z wielu kont łączą się w jedną wiadomość co kilka sekund, a alert o tym samym problemie na kilku kontach naraz to jedna wiadomość, np. „Rozłączone: 3/4 kont”. **Ping dostajesz tylko przy stanie BŁĄD i banie.** Awaria Discorda nigdy nie zatrzymuje kopania.
+
+### 8.6 Bezpieczeństwo i prywatność
+
+- **Hasła i adres webhooka** są w pliku `secrets.json`, **zaszyfrowane Windows DPAPI**: odczyta je tylko ten sam użytkownik Windows na tym samym komputerze. Po przeniesieniu programu na inny komputer wpisz je ponownie. Ich nie ma w `config.json`.
+- `config.json` zawiera konta, komendy i ustawienia, ale nie zawiera haseł. Mimo to nie wysyłaj go ani `secrets.json` nikomu; oba są w `.gitignore`. W repozytorium jest tylko `config.example.json` jako wzór.
+- Program zamyka wyłącznie proces gry wybranej instancji. Launchera ani innych instancji nie rusza.
+
+### 8.7 Narzędzia diagnostyczne (konsola)
+
+W folderze z kodem (`python devtools.py …`):
+
+| Polecenie | Co robi |
+|---|---|
+| `instances` | Launcher, instancje, okna gry i przypisane konta |
+| `replay <plik> [preset]` | Zdarzenia wykryte w starym logu (`.log` / `.log.gz`) |
+| `tail <instancja>` | Na żywo: zdarzenia z `latest.log` instancji |
+| `discord-test` | Wiadomość testowa na zapisany webhook |
+| `chat <instancja> "<tekst>"` | Wpisuje tekst lub komendę na czacie okna (prawdziwa wysyłka) |
+| `keys <instancja> KLAWISZ…` | Naciska klawisze w oknie, np. `TAB ENTER wait:2 ENTER` |
+| `pause-test <instancja>` | Kopanie → pauza → wznowienie → stop na prawdziwym oknie |
+| `relaunch <instancja> [--yes]` | Restart jednej instancji; bez `--yes` tylko pokazuje, co by zrobił |
 
 ## Najczęstsze problemy
 
@@ -146,4 +229,10 @@ Przy każdym przejściu postać może przejść odrobinę za dużo albo za mało
 | Postać chodzi, ale nie kopie | Kliknij w okno gry (nie może być otwartego menu ani ekwipunku); jeśli to nie pomoże, użyj metody „Pierwszy plan” |
 | Postać przechodzi za daleko lub za mało | Zrób kalibrację jeszcze raz (punkt 6) |
 | F8 nie działa | Inny program zajął już klawisz F8 (program pokaże o tym komunikat). Najczęściej to druga, wcześniej uruchomiona kopia Kopacza, więc ją zamknij. W ostateczności używaj przycisku **Stop wszystkie** |
+| Okno nie przypisuje się do konta („brak konta”) | Ustaw launcher (**Zaawansowane → Wykryj**) i wybierz w koncie właściwą instancję. Okno rozpoznawane jest po instancji, więc działa tylko z launcherami typu Prism/MultiMC |
+| „Nie udało się odczytać secrets.json” | Plik pochodzi z innego komputera albo użytkownika Windows. Wpisz hasła i webhook ponownie (zakładki Konta i Discord) |
+| „Test nieudany: HTTP 404/401” w zakładce Discord | Adres webhooka jest nieprawidłowy albo usunięty. Utwórz nowy w ustawieniach kanału |
+| Bot po rozłączeniu nie wraca na serwer | Sprawdź, czy powrót jest włączony (**Zaawansowane → Powrót na serwer**), czy konto ma hasło, a profil serwera komendę logowania, i czy sekwencja klawiszy w menu działa (punkt 8.4) |
+| Konto w stanie „Błąd: nie udało się wrócić na serwer” | Wyczerpały się próby powrotu. Kopanie jest wstrzymane, a alert z ostatnimi liniami logu poszedł na Discorda. Gdy włączone jest wolne ponawianie, bot próbuje dalej sam |
+| „Profil serwera nie ma komend lobby → gra” | W zakładce **Serwer** uzupełnij „Komendy z lobby do gry” |
 | Grasz na innych klawiszach niż WASD | Wpisz swoje klawisze ruchu w pola „Klawisz w prawo/w lewo”; obsługiwane są litery, cyfry oraz `SPACE`, `SHIFT`, `CTRL`, `LEFT`, `RIGHT`, `UP`, `DOWN` |
