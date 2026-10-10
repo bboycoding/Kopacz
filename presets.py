@@ -37,6 +37,11 @@ BFSMC_DISCORD_EXCLUDE = [
 ]
 
 
+BFSMC_DISCORD_INCLUDE = [
+    r"Restart serwera nastąpi",
+]
+
+
 def new_profile(preset_id: str, profile_id: str) -> ServerProfile:
     """Kopia presetu pod nowym identyfikatorem (żeby edycja nie zmieniała presetu)."""
     return replace(PRESETS[preset_id], id=profile_id,

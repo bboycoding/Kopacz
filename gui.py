@@ -1,4 +1,5 @@
 """Okno aplikacji (customtkinter)."""
+import re
 import string
 import threading
 import time
@@ -8,12 +9,17 @@ from dataclasses import replace
 import customtkinter as ctk
 
 import launcher as L
+import presets
 import theme as T
-from config import AccountCfg, Config, LauncherCfg, load_config, save_config
+from config import AccountCfg, Config, DiscordCfg, LauncherCfg, ServerProfile, load_config, save_config
 from gui_tabs.accounts_tab import AccountEditor, AccountsTab
 from gui_tabs.advanced_tab import AdvancedTab
+from gui_tabs.discord_tab import DiscordTab
+from gui_tabs.server_tab import ServerTab
 from hotkey import GlobalHotkey
 from miner import Miner, run_action
+from monitor import Monitor
+from discord_notify import valid_webhook
 from secrets_store import load_secrets, save_secrets
 from win_input import VK_F8, key_to_vk
 from windows import McWindow, find_minecraft_windows, flash_window
@@ -169,6 +175,7 @@ class App(ctk.CTk):
         self.instances: list[L.Instance] = []
         self.profile_names: list[str] = []
         self.window_instance: dict[int, str] = {}   # hwnd → ID instancji (z linii poleceń procesu)
+        self.monitor = Monitor(self._status_text)
         self.miners: dict[int, Miner] = {}
         self.rows: dict[int, WindowRow] = {}
         self._action_stop = threading.Event()
@@ -185,6 +192,7 @@ class App(ctk.CTk):
         self.reload_instances()
         self._build()
         self.refresh_windows()
+        self.restart_monitor()
 
         self.hotkey = GlobalHotkey(VK_F8, self._on_hotkey)
         self.hotkey.start()
@@ -277,6 +285,8 @@ class App(ctk.CTk):
         self.tabs._segmented_button.configure(font=f["label"])
         body = self.tabs.add("Kopanie")
         accounts_tab = self.tabs.add("Konta")
+        server_tab = self.tabs.add("Serwer")
+        discord_tab = self.tabs.add("Discord")
         advanced_tab = self.tabs.add("Zaawansowane")
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -408,6 +418,8 @@ class App(ctk.CTk):
         self.info.pack(side="left", fill="x", expand=True, padx=(0, 12))
 
         self._build_accounts_tab(accounts_tab)
+        self.server_tab = ServerTab(self, server_tab)
+        self.discord_tab = DiscordTab(self, discord_tab)
         self._build_advanced_tab(advanced_tab)
 
     def _on_backend_change(self, label: str) -> None:
@@ -553,6 +565,7 @@ class App(ctk.CTk):
                 return f"Nie udało się zapisać ustawień: {e}"
         self.reload_instances()
         self.refresh_windows()
+        self.restart_monitor()
         return ""
 
     def account_for_instance(self, instance_id: str) -> AccountCfg | None:
@@ -601,6 +614,7 @@ class App(ctk.CTk):
             return f"Nie udało się zapisać: {e}"
         self.accounts_tab.refresh()
         self.refresh_windows()
+        self.restart_monitor()
         self.set_info(f"Zapisano konto „{acc.name}”.")
         return ""
 
@@ -615,7 +629,96 @@ class App(ctk.CTk):
             return
         self.accounts_tab.refresh()
         self.refresh_windows()
+        self.restart_monitor()
         self.set_info("Usunięto konto.")
+
+    # ---------- profile serwerów, Discord, monitor logów ----------
+
+    def restart_monitor(self) -> None:
+        self.monitor.apply(self.cfg, self.secrets, self.cfg.launcher.instances_dir)
+
+    def _status_text(self) -> str:
+        """Status kont do okresowej wiadomości na Discordzie (wołane z wątku notifiera; tylko odczyt)."""
+        lines = []
+        for hwnd, m in list(self.miners.items()):
+            if not m.is_alive():
+                continue
+            acc = self.account_for_instance(self.window_instance.get(hwnd, ""))
+            label = (acc.nick or acc.name) if acc else m.window.title[:24]
+            lines.append(f"{label}: {m.status}, cykle {m.cycles}, czas {_fmt_time(m.runtime)}")
+        return "\n".join(lines) or "Żadne konto nie kopie."
+
+    def new_server_id(self, name: str) -> str:
+        base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "serwer"
+        used = {s.id for s in self.cfg.servers}
+        candidate, n = base, 2
+        while candidate in used:
+            candidate, n = f"{base}-{n}", n + 1
+        return candidate
+
+    def save_server(self, profile: ServerProfile, preset: str | None = None) -> str:
+        servers = list(self.cfg.servers)
+        for i, existing in enumerate(servers):
+            if existing.id == profile.id:
+                servers[i] = profile
+                break
+        else:
+            servers.append(profile)
+        ids = {s.id for s in servers}
+        # Konta z profilem spoza listy (np. domyślnym sprzed dodania profili) dostają ten profil.
+        accounts = [a if a.server_id in ids else replace(a, server_id=profile.id) for a in self.cfg.accounts]
+        discord = self.cfg.discord
+        if preset == "bfsmc" and not discord.include and not discord.exclude:
+            discord = replace(discord, include=list(presets.BFSMC_DISCORD_INCLUDE),
+                              exclude=list(presets.BFSMC_DISCORD_EXCLUDE))
+        candidate = replace(self.cfg, servers=servers, accounts=accounts, discord=discord)
+        try:
+            candidate.validate()
+        except ValueError as e:
+            return str(e)
+        self.cfg.servers, self.cfg.accounts, self.cfg.discord = servers, accounts, discord
+        try:
+            save_config(self.cfg)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        self.restart_monitor()
+        self.accounts_tab.refresh()
+        self.set_info(f"Zapisano profil serwera „{profile.name}”.")
+        return ""
+
+    def delete_server(self, server_id: str) -> str:
+        users = [a.name or a.nick for a in self.cfg.accounts if a.server_id == server_id]
+        if users:
+            return "Profil jest używany przez konta: " + ", ".join(users) + "."
+        self.cfg.servers = [s for s in self.cfg.servers if s.id != server_id]
+        try:
+            save_config(self.cfg)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        self.restart_monitor()
+        self.set_info("Usunięto profil serwera.")
+        return ""
+
+    def save_discord(self, dcfg: DiscordCfg, webhook: str, ping_id: str) -> str:
+        if ping_id and not ping_id.isdigit():
+            return "ID użytkownika Discorda to same cyfry."
+        if dcfg.enabled and not webhook:
+            return "Podaj adres webhooka albo wyłącz wysyłkę."
+        if webhook and not valid_webhook(webhook):
+            return "Niepoprawny adres webhooka (https://discord.com/api/webhooks/…)."
+        try:
+            replace(self.cfg, discord=dcfg).validate()
+        except ValueError as e:
+            return str(e)
+        self.cfg.discord = dcfg
+        self.secrets.discord_webhook, self.secrets.discord_ping_id = webhook, ping_id
+        try:
+            save_config(self.cfg)
+            save_secrets(self.secrets)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        self.restart_monitor()
+        return ""
 
     # ---------- kopanie ----------
 
@@ -738,6 +841,7 @@ class App(ctk.CTk):
             self._hotkey_pressed.clear()
             self.set_info(f"Zatrzymano wszystko klawiszem F8 ({time.strftime('%H:%M:%S')}).")
         self._update_rows()
+        self.discord_tab.update_stats()
         self.after(TICK_MS, self._tick)
 
     def on_close(self) -> None:
@@ -747,4 +851,5 @@ class App(ctk.CTk):
         for m in self.miners.values():
             m.join(timeout=2)
         self.hotkey.stop()
+        self.monitor.stop()
         self.destroy()

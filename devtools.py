@@ -1,11 +1,19 @@
 """Narzędzia diagnostyczne z konsoli (bez GUI).
 
-  python devtools.py instances    — launcher, instancje, okna gry i konta
+  python devtools.py instances                 — launcher, instancje, okna gry i konta
+  python devtools.py replay <plik> [preset]    — zdarzenia wykryte w starym logu (.log / .log.gz); preset: bfsmc, vanilla
+  python devtools.py tail <id_instancji> [preset] — na żywo: zdarzenia z latest.log instancji (Ctrl+C kończy)
+  python devtools.py discord-test              — wiadomość testowa na zapisany webhook
 """
 import sys
+import time
 
 import launcher as L
+import log_watcher as W
+import presets
 from config import load_config
+from discord_notify import DiscordNotifier, valid_webhook
+from secrets_store import load_secrets
 from windows import find_minecraft_windows
 
 
@@ -31,14 +39,73 @@ def cmd_instances() -> int:
     return 0
 
 
-COMMANDS = {"instances": cmd_instances}
+def _preset(name: str | None):
+    if name is None:
+        return presets.BFSMC
+    if name not in presets.PRESETS:
+        raise SystemExit(f"Nieznany preset „{name}” (dostępne: {', '.join(presets.PRESETS)}).")
+    return presets.PRESETS[name]
+
+
+def cmd_replay(path: str, preset: str | None = None) -> int:
+    counts, examples = W.summarize(path, _preset(preset), samples=2)
+    if not counts:
+        print("Brak wykrytych zdarzeń.")
+    for kind in W.EVENT_KINDS:
+        if kind in counts:
+            print(f"{kind:<16}{counts[kind]}")
+            for ex in examples[kind]:
+                print(f"    {ex}")
+    return 0
+
+
+def cmd_tail(instance_id: str, preset: str | None = None) -> int:
+    cfg = load_config()
+    instances_dir = cfg.launcher.instances_dir or L.detect_launcher()[1]
+    path = L.log_path_for(instances_dir, instance_id)
+    profile = _preset(preset)
+    print(f"Czytam {path} (Ctrl+C kończy)")
+
+    def show(line: str) -> None:
+        ev = W.classify(line, profile)
+        if ev is not None and ev.kind in W.EVENT_KINDS:
+            print(f"{ev.ts}  {ev.kind:<15}{ev.text}")
+
+    tail = W.LogTail(path, show)
+    tail.start()
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        tail.stop()
+    return 0
+
+
+def cmd_discord_test() -> int:
+    secrets = load_secrets()
+    if secrets.load_error:
+        print(secrets.load_error)
+        return 1
+    if not valid_webhook(secrets.discord_webhook):
+        print("Brak poprawnego webhooka — wpisz go w zakładce Discord i zapisz.")
+        return 1
+    ok, err = DiscordNotifier(secrets.discord_webhook).send_test()
+    print("Wysłano. Sprawdź kanał." if ok else f"Błąd: {err}")
+    return 0 if ok else 1
+
+
+COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test}
 
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] not in COMMANDS:
         print(__doc__)
         return 1
-    return COMMANDS[argv[1]]()
+    try:
+        return COMMANDS[argv[1]](*argv[2:])
+    except TypeError:
+        print(__doc__)
+        return 1
 
 
 if __name__ == "__main__":
