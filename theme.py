@@ -32,6 +32,7 @@ GAP = 8                   # odstęp między elementami
 STATUS_COLORS = {
     "Kopie": ACCENT,
     "Startuje…": WARNING,
+    "Wstrzymany": WARNING,
     "Okno MC zamknięte": WARNING,
     "Zatrzymany": TEXT_MUTED,
     "Gotowy": TEXT_MUTED,

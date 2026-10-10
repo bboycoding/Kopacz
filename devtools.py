@@ -4,6 +4,8 @@
   python devtools.py replay <plik> [preset]    — zdarzenia wykryte w starym logu (.log / .log.gz); preset: bfsmc, vanilla
   python devtools.py tail <id_instancji> [preset] — na żywo: zdarzenia z latest.log instancji (Ctrl+C kończy)
   python devtools.py discord-test              — wiadomość testowa na zapisany webhook
+  python devtools.py pause-test <id_instancji> [kopanie_s] [pauza_s]
+                                               — na PRAWDZIWYM oknie: kopanie, pauza, wznowienie, stop
 """
 import sys
 import time
@@ -12,6 +14,7 @@ import launcher as L
 import log_watcher as W
 import presets
 from config import load_config
+from miner import Miner
 from discord_notify import DiscordNotifier, valid_webhook
 from secrets_store import load_secrets
 from windows import find_minecraft_windows
@@ -94,7 +97,43 @@ def cmd_discord_test() -> int:
     return 0 if ok else 1
 
 
-COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test}
+def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> int:
+    """Kopie `mine_s` s → pauza `pause_s` s → kopie 10 s → stop. Postać RUSZA SIĘ w grze — patrz na okno."""
+    cfg = load_config()
+    windows = [w for w in find_minecraft_windows() if L.instance_for_pid(w.pid) == instance_id]
+    if len(windows) != 1:
+        print(f"Znaleziono {len(windows)} okien dla instancji „{instance_id}” (potrzebne dokładnie 1).")
+        return 1
+    mine_s, pause_s = float(mine_s), float(pause_s)
+    m = Miner(windows[0], cfg)
+    start = time.monotonic()
+
+    def log(msg: str) -> None:
+        print(f"[{time.monotonic() - start:5.1f} s] {msg} | status: {m.status}, cykle: {m.cycles}")
+
+    def released() -> str:
+        held = getattr(m.sender, "_held", None)
+        lmb = getattr(m.sender, "_lmb", getattr(m.sender, "_lmb_pressed", None))
+        return f"wciśnięte klawisze: {sorted(held) if held else 'brak'}, LPM: {'WCIŚNIĘTY' if lmb else 'puszczony'}"
+
+    m.start()
+    time.sleep(mine_s)
+    log("kopie")
+    ok = m.pause()
+    log(f"pauza (potwierdzona: {ok}); {released()}")
+    time.sleep(pause_s)
+    m.resume()
+    time.sleep(1)
+    log("wznowiono")
+    time.sleep(10)
+    m.stop()
+    m.join(5)
+    log(f"stop; {released()}")
+    return 0 if ok else 1
+
+
+COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test,
+            "pause-test": cmd_pause_test}
 
 
 def main(argv: list[str]) -> int:

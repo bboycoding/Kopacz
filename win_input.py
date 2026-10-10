@@ -30,6 +30,15 @@ SPECIAL_KEYS = {
 }
 
 
+# Klawisze rozszerzone (osobny blok strzałek itd.): w lParam mają ustawiony bit 24, a keybd_event
+# wymaga KEYEVENTF_EXTENDEDKEY. Bez tego GLFW odczyta strzałki jako klawisze numeryczne (KP_4/6/8/2).
+EXTENDED_VKS = frozenset({
+    win32con.VK_LEFT, win32con.VK_RIGHT, win32con.VK_UP, win32con.VK_DOWN,
+    win32con.VK_INSERT, win32con.VK_DELETE, win32con.VK_HOME, win32con.VK_END,
+    win32con.VK_PRIOR, win32con.VK_NEXT, win32con.VK_RCONTROL, win32con.VK_RMENU,
+})
+
+
 def key_to_vk(name: str) -> int:
     name = name.strip().upper()
     if name in SPECIAL_KEYS:
@@ -44,10 +53,16 @@ def _scan(vk: int) -> int:
     return win32api.MapVirtualKey(vk, 0)
 
 
+def _ext_flag(vk: int) -> int:
+    return win32con.KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_VKS else 0
+
+
 def _key_lparam(vk: int, up: bool, repeat: bool = False) -> int:
     # Bity: 0–15 licznik powtórzeń, 16–23 scan code (GLFW mapuje klawisze po nim),
-    # 30 poprzedni stan, 31 przejście (puszczenie).
+    # 24 klawisz rozszerzony, 30 poprzedni stan, 31 przejście (puszczenie).
     lp = 1 | (_scan(vk) << 16)
+    if vk in EXTENDED_VKS:
+        lp |= 1 << 24
     if up:
         lp |= (1 << 30) | (1 << 31)
     elif repeat:
@@ -155,12 +170,12 @@ class ForegroundBackend:
 
     def key_down(self, vk: int) -> None:
         if self._in_session:
-            win32api.keybd_event(vk, _scan(vk), 0, 0)
+            win32api.keybd_event(vk, _scan(vk), _ext_flag(vk), 0)
             self._held.add(vk)
 
     def key_up(self, vk: int) -> None:
         if vk in self._held:
-            win32api.keybd_event(vk, _scan(vk), win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(vk, _scan(vk), win32con.KEYEVENTF_KEYUP | _ext_flag(vk), 0)
             self._held.discard(vk)
 
     def lmb_down(self) -> None:
