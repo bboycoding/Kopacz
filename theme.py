@@ -33,6 +33,8 @@ STATUS_COLORS = {
     "Kopie": ACCENT,
     "Startuje…": WARNING,
     "Wstrzymany": WARNING,
+    "Odzyskiwanie": WARNING,
+    "Rozłączono, czekam na powrót": WARNING,
     "Okno MC zamknięte": WARNING,
     "Zatrzymany": TEXT_MUTED,
     "Gotowy": TEXT_MUTED,

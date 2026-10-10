@@ -192,6 +192,12 @@ class Config:
             key_to_vk(r.chat_key)
         except ValueError as e:
             raise ValueError(f"Klawisz czatu: {e}") from e
+        if not 0 <= r.pause_before_s <= 600:
+            raise ValueError("Pauza przed powrotem musi być w zakresie 0–600 s.")
+        if not 1 <= r.join_timeout_s <= 600:
+            raise ValueError("Czas oczekiwania na wejście do gry musi być w zakresie 1–600 s.")
+        if not 0 <= r.gate_spacing_s <= 600:
+            raise ValueError("Odstęp między kontami musi być w zakresie 0–600 s.")
         if not 0 <= r.stabilize_s <= 3600:
             raise ValueError("Stabilizacja po powrocie musi być w zakresie 0–3600 s.")
         if r.slow_retry_min < 1:

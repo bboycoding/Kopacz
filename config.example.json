@@ -80,13 +80,13 @@
       "instance_id": "nazwa-instancji",
       "log_path": "",
       "server_id": "bfsmc",
-      "home_command": "/home 1",
+      "home_command": "",
       "after_join_commands": [],
       "schedule": [
         {
-          "text": "/home 1",
-          "every_min": 30,
-          "jitter_s": 60,
+          "text": "/pomoc",
+          "every_min": 60,
+          "jitter_s": 120,
           "on_missed": "defer"
         }
       ],

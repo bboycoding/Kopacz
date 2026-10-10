@@ -13,7 +13,8 @@ import presets
 import theme as T
 from accounts import Account
 from chat import ChatError, ChatSender
-from config import AccountCfg, Config, DiscordCfg, LauncherCfg, ServerProfile, load_config, save_config
+from config import (AccountCfg, Config, DiscordCfg, LauncherCfg, RejoinCfg, ServerProfile, load_config,
+                    save_config)
 from gui_tabs.accounts_tab import AccountEditor, AccountsTab
 from gui_tabs.advanced_tab import AdvancedTab
 from gui_tabs.discord_tab import DiscordTab
@@ -21,6 +22,7 @@ from gui_tabs.server_tab import ServerTab
 from hotkey import GlobalHotkey
 from miner import Miner, run_action
 from monitor import Monitor
+from rejoin import Rejoiner, RejoinGate
 from discord_notify import valid_webhook
 from secrets_store import load_secrets, save_secrets
 from win_input import VK_F8, key_to_vk
@@ -178,7 +180,9 @@ class App(ctk.CTk):
         self.profile_names: list[str] = []
         self.window_instance: dict[int, str] = {}   # hwnd → ID instancji (z linii poleceń procesu)
         self.monitor = Monitor(self._status_text)
-        self.runners: dict[int, Account] = {}     # hwnd → nadzorca konta (harmonogram komend)
+        self.runners: dict[int, Account] = {}     # hwnd → nadzorca konta (harmonogram komend, rejoin)
+        self.rejoin_gate = RejoinGate(self.cfg.rejoin.gate_spacing_s)
+        self.monitor.listeners.append(self._on_log_event)
         self.miners: dict[int, Miner] = {}
         self.rows: dict[int, WindowRow] = {}
         self._action_stop = threading.Event()
@@ -530,7 +534,16 @@ class App(ctk.CTk):
         self.accounts_tab = AccountsTab(self, parent)
 
     def _build_advanced_tab(self, parent) -> None:
-        self.advanced_tab = AdvancedTab(self, parent)
+        # Zakładka ma kilka kart i nie mieści się w oknie — własny pasek przewijania.
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        scroll = ctk.CTkScrollableFrame(parent, fg_color=T.APP_BG, corner_radius=0,
+                                        scrollbar_button_color=T.BORDER,
+                                        scrollbar_button_hover_color=T.TEXT_MUTED)
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        self.advanced_scroll = scroll
+        self.advanced_tab = AdvancedTab(self, scroll)
 
     def detect_launcher(self) -> tuple[str, str]:
         return L.detect_launcher()
@@ -738,18 +751,51 @@ class App(ctk.CTk):
         if old:
             old.stop()
         acc = self.account_for_instance(self.window_instance.get(window.hwnd, ""))
-        if not (acc and acc.enabled and acc.schedule):
+        rcfg = replace(self.cfg.rejoin)
+        if not (acc and acc.enabled and (acc.schedule or rcfg.enabled)):
             return
+        label = acc.nick or acc.name or acc.instance_id
 
-        def emit(text: str, acc=acc) -> None:
+        def emit(text: str) -> None:
             notifier = self.monitor.notifier
             if notifier:
-                notifier.line(acc.nick or acc.name or acc.instance_id, text)
+                notifier.line(label, text)
 
-        runner = Account(acc, miner, window.hwnd, chat_key=self.cfg.rejoin.chat_key,
-                         stabilize_s=self.cfg.rejoin.stabilize_s, emit=emit)
+        def alert(key: str, summary: str, text: str, ping: bool) -> None:
+            notifier = self.monitor.notifier
+            if notifier:
+                notifier.alert(key, summary, label, text, ping)
+
+        profile = next((s for s in self.cfg.servers if s.id == acc.server_id), None)
+        factory = None
+        if rcfg.enabled:
+            def factory(stop, acc=acc, profile=profile):
+                return Rejoiner(acc, profile, rcfg, miner, window.hwnd, rcfg.chat_key, stop,
+                                self.rejoin_gate, emit, alert)
+
+        runner = Account(acc, miner, window.hwnd, chat_key=rcfg.chat_key, stabilize_s=rcfg.stabilize_s,
+                         emit=emit, rejoiner_factory=factory)
         self.runners[window.hwnd] = runner
         runner.start()
+
+    def _on_log_event(self, acc: AccountCfg, ev) -> None:
+        """Zdarzenie z logu (wątek LogTail) → nadzorca właściwego konta."""
+        for runner in list(self.runners.values()):
+            if runner.acc.id == acc.id:
+                runner.on_event(ev)
+
+    def apply_rejoin_settings(self, rejoin: RejoinCfg) -> str:
+        try:
+            replace(self.cfg, rejoin=rejoin).validate()
+        except ValueError as e:
+            return str(e)
+        self.cfg.rejoin = rejoin
+        self.rejoin_gate.spacing = rejoin.gate_spacing_s
+        try:
+            save_config(self.cfg)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        return ""
 
     def send_chat_now(self, instance_id: str, text: str) -> None:
         """Przycisk „Teraz”: wpisuje komendę na czacie okna danej instancji."""
@@ -893,7 +939,7 @@ class App(ctk.CTk):
         for hwnd, row in self.rows.items():
             m = self.miners.get(hwnd)
             if m and m.is_alive():
-                status = m.status
+                status = m.note or m.status
                 row.show_state(status, True, m.cycles, m.runtime)
                 any_mining |= status == "Kopie"
             else:

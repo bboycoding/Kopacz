@@ -19,6 +19,7 @@ TICK = 0.5              # co ile sekund nadzorca sprawdza terminy
 COMMAND_GAP = 1.2       # przerwa między komendami wysyłanymi jedna po drugiej (antyspam serwera)
 RETRY_AFTER_ERROR = 30.0
 MIN_INTERVAL = 5.0
+STALE_REQUEST_S = 60.0  # „Wyślij teraz” starsze niż to nie jest już wysyłane
 
 
 @dataclass
@@ -32,7 +33,7 @@ class Account(threading.Thread):
     def __init__(self, acc: AccountCfg, miner, hwnd: int, chat_key: str = "T", stabilize_s: float = 60.0,
                  emit: Callable[[str], None] | None = None, clock: Callable[[], float] = time.monotonic,
                  sender_factory=ChatSender, connected: Callable[[int], bool] = is_connected,
-                 rng: random.Random | None = None):
+                 rng: random.Random | None = None, rejoiner_factory=None):
         super().__init__(daemon=True, name=f"Account-{acc.id}")
         self.acc = acc
         self.miner = miner
@@ -47,6 +48,8 @@ class Account(threading.Thread):
         self._stop_event = threading.Event()
         self._requests: queue.Queue = queue.Queue()     # „Wyślij teraz”: (tekst, callback)
         self._ok_since: float | None = None
+        # Odzyskiwanie połączenia (rejoin): dostaje ten sam stop, co nadzorca.
+        self.rejoiner = rejoiner_factory(self._stop_event) if rejoiner_factory else None
         now = clock()
         self._items = [_Scheduled(c, now + self._interval(c)) for c in acc.schedule if c.text.strip()]
 
@@ -61,9 +64,14 @@ class Account(threading.Thread):
     def stop(self) -> None:
         self._stop_event.set()
 
+    def on_event(self, ev) -> None:
+        """Zdarzenie z logu tego konta (wołane z wątku LogTail)."""
+        if self.rejoiner is not None:
+            self.rejoiner.feed(ev)
+
     def send_now(self, text: str, callback: Callable[[bool, str], None] | None = None) -> None:
         """Wysyła komendę poza harmonogramem (z tego samego wątku, z pauzą kopacza)."""
-        self._requests.put((text, callback))
+        self._requests.put((text, callback, self.clock()))
 
     @property
     def next_due_in(self) -> float | None:
@@ -103,6 +111,9 @@ class Account(threading.Thread):
             while not self._stop_event.wait(TICK):
                 if not self.miner.is_alive():
                     return
+                if self.rejoiner is not None and self.rejoiner.poll():
+                    self._ok_since = None       # po odzyskiwaniu liczymy stabilizację od nowa
+                    continue
                 now = self.clock()
                 self._update_ok_since(now)
                 self._serve_requests()
@@ -159,10 +170,12 @@ class Account(threading.Thread):
     def _serve_requests(self) -> None:
         while True:
             try:
-                text, callback = self._requests.get_nowait()
+                text, callback, queued_at = self._requests.get_nowait()
             except queue.Empty:
                 return
-            if not self._can_send():
+            if self.clock() - queued_at > STALE_REQUEST_S:
+                ok, msg = False, "żądanie za stare (konto było zajęte odzyskiwaniem połączenia)"
+            elif not self._can_send():
                 ok, msg = False, "konto teraz nie kopie albo okno nie jest połączone z serwerem"
             else:
                 ok, msg = self._send_batch([text])

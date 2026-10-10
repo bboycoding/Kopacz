@@ -152,7 +152,9 @@ class AccountEditor(ctk.CTkToplevel):
                                            show="" if self.show_pw.get() else "•"))
         self.show_pw.grid(row=0, column=1, padx=(10, 0))
 
-        label("Komenda powrotu na stanowisko", "Np. /home kopanie — wysyłana po wejściu do gry.")
+        label("Komenda po powrocie na serwer (opcjonalnie)",
+              "Zwykle puste: po wejściu do trybu postać jest od razu na miejscu. Wpisz np. /home 1 tylko wtedy, "
+              "gdy trzeba gdzieś wrócić.")
         self.home = app._entry(form, width=0)
         self.home.insert(0, acc.home_command)
         self.home.pack(fill="x", padx=12)

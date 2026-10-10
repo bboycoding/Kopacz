@@ -46,6 +46,7 @@ class Miner(threading.Thread):
         self.cycles = 0
         self.started_at: float | None = None
         self.status = "Startuje…"
+        self.note: str | None = None            # komunikat z zewnątrz (np. „Odzyskiwanie”); GUI pokazuje go zamiast statusu
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -157,6 +158,7 @@ class Miner(threading.Thread):
         finally:
             self.sender.release_all()
             self._paused_ack.set()      # nikt nie czeka na pauzę kopacza, którego już nie ma
+            self.note = None
             if self.status in ("Kopie", "Wstrzymany"):
                 self.status = "Zatrzymany"
 
