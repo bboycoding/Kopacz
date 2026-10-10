@@ -88,6 +88,8 @@ class RejoinCfg:
     max_attempts_l0: int = 6
     max_attempts_l1: int = 5
     max_attempts_l2: int = 2
+    connect_timeout_s: float = 20.0     # po nawigacji po menu: tyle czasu na „Connecting to”
+    login_timeout_s: float = 45.0       # od połączenia do wejścia do lobby / trybu gry
     slow_retry: bool = True
     slow_retry_min: float = 30.0
     gate_spacing_s: float = 10.0
@@ -187,11 +189,18 @@ class Config:
             raise ValueError("Limity prób rejoinu nie mogą być ujemne.")
         if not r.backoff_s or any(x <= 0 for x in r.backoff_s):
             raise ValueError("Lista odstępów (backoff) musi zawierać liczby dodatnie.")
+        from chat import parse_menu_keys
         from win_input import key_to_vk
         try:
             key_to_vk(r.chat_key)
         except ValueError as e:
             raise ValueError(f"Klawisz czatu: {e}") from e
+        try:
+            parse_menu_keys(r.menu_keys)
+        except ValueError as e:
+            raise ValueError(f"Sekwencja klawiszy w menu: {e}") from e
+        if not 1 <= r.connect_timeout_s <= 600 or not 1 <= r.login_timeout_s <= 600:
+            raise ValueError("Czasy oczekiwania na połączenie i logowanie muszą być w zakresie 1–600 s.")
         if not 0 <= r.pause_before_s <= 600:
             raise ValueError("Pauza przed powrotem musi być w zakresie 0–600 s.")
         if not 1 <= r.join_timeout_s <= 600:

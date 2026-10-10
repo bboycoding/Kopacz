@@ -1,14 +1,14 @@
-"""Odzyskiwanie połączenia z serwerem (poziom 0: powrót z lobby do trybu gry).
+"""Odzyskiwanie połączenia z serwerem: poziom 0 (lobby → tryb gry) i poziom 1 (menu → serwer → logowanie).
 
-Rejoiner działa w wątku nadzorcy konta (Account). Gdy log zgłosi przeniesienie do lobby albo
-rozłączenie, kopacz jest natychmiast wstrzymywany (żeby nie klikał w menu), a następnie:
+Rejoiner działa w wątku nadzorcy konta (Account). Po wykryciu problemu kopacz jest natychmiast
+wstrzymywany (żeby nie klikał w menu), a następnie:
   lobby       → pauza → komendy lobby→gra z profilu serwera → czekanie na wzorzec „wejście do gry”
-                → ponawianie z rosnącym odstępem → po wyczerpaniu prób stan BŁĄD, alert z pingiem
-                i (opcjonalnie) wolne ponawianie co N minut
-  rozłączenie → kopacz zostaje wstrzymany; wznawia się sam, gdy konto wróci na serwer
-                (poziom 1, czyli samodzielna nawigacja po menu, dojdzie w kolejnym kroku)
-  ban         → tylko alert (wysyła go Monitor), bez ponawiania
-Wszystkie czekania są przerywane stopem (F8, zamknięcie programu).
+  rozłączenie → klawisze w menu (ekran „Disconnected” → lista serwerów → dołącz) → czekanie na
+                „Connecting to” (i sprawdzenie adresu) → komenda logowania z hasłem → lobby → poziom 0
+  ban         → tylko wstrzymanie (alert wysyła Monitor), bez ponawiania
+Każdy poziom ponawia z rosnącym odstępem. Po wyczerpaniu prób: stan BŁĄD, alert z pingiem (raz)
+i opcjonalnie wolne ponawianie co N minut. Wszystkie czekania są przerywane stopem (F8, zamknięcie).
+Restart instancji (poziom 2) dojdzie w kolejnym kroku.
 """
 import queue
 import random
@@ -18,8 +18,10 @@ from collections import deque
 from collections.abc import Callable
 from contextlib import contextmanager
 
+import win32gui
+
 import log_watcher as W
-from chat import ChatAborted, ChatError, ChatSender
+from chat import ChatAborted, ChatError, ChatSender, MenuNavigator
 from config import AccountCfg, RejoinCfg, ServerProfile
 from windows import is_connected
 
@@ -27,15 +29,27 @@ TICK = 0.2
 COMMAND_GAP = 1.2           # przerwa między komendami wysyłanymi jedna po drugiej
 SETTLE_S = 3.0              # chwila po wejściu do gry, zanim kopacz ruszy
 DEBOUNCE_S = 3.0            # tyle sekund brak „Multiplayer” w tytule = rozłączenie
+MENU_SETTLE_S = 1.5         # po rozłączeniu ekran „Disconnected” potrzebuje chwili na pojawienie się
+TITLE_WAIT_S = 3.0          # tyle czekamy, aż tytuł okna przestanie wskazywać połączenie
 HOLD_ALERT_S = 600.0        # po tylu sekundach rozłączenia bez powrotu: alert z pingiem
 LOG_TAIL_LINES = 30
 LOG_TAIL_CHARS = 1500
 
 OK, RECOVERING, ERROR, BANNED = "ok", "recovering", "error", "banned"
+# Zdarzenia przekazywane do Rejoinera (reszta linii logu go nie interesuje).
+_FED = (W.MOVED_TO_LOBBY, W.LOBBY, W.DISCONNECTED, W.BAN, W.IN_GAME, W.CONNECTING, W.LOGIN_PROMPT, W.LOGGED_IN)
+
+
+def _title_reliable(hwnd: int) -> bool:
+    """Tytuł okna GLFW (1.13+) odzwierciedla połączenie; stare okna LWJGL mają stały tytuł."""
+    try:
+        return win32gui.GetClassName(hwnd) != "LWJGL"
+    except win32gui.error:
+        return True
 
 
 class RejoinGate:
-    """Wspólna dla wszystkich kont: tylko jedno konto naraz wysyła komendy powrotu, z odstępem
+    """Wspólna dla wszystkich kont: tylko jedno konto naraz wysyła komendy/klawisze powrotu, z odstępem
     między kolejnymi (po restarcie serwera wszystkie konta wracają jednocześnie)."""
 
     def __init__(self, spacing_s: float = 10.0, clock: Callable[[], float] = time.monotonic):
@@ -63,7 +77,10 @@ class Rejoiner:
     def __init__(self, acc: AccountCfg, profile: ServerProfile | None, rcfg: RejoinCfg, miner, hwnd: int,
                  chat_key: str, stop_event: threading.Event, gate: RejoinGate,
                  emit: Callable[[str], None], alert: Callable[[str, str, str, bool], None],
-                 sender_factory=ChatSender, connected: Callable[[int], bool] = is_connected,
+                 password: Callable[[], str] = lambda: "",
+                 sender_factory=ChatSender, menu_factory=MenuNavigator,
+                 connected: Callable[[int], bool] = is_connected,
+                 title_reliable: Callable[[int], bool] = _title_reliable,
                  rng: random.Random | None = None, clock: Callable[[], float] = time.monotonic):
         self.acc = acc
         self.profile = profile
@@ -75,30 +92,40 @@ class Rejoiner:
         self.gate = gate
         self._emit = emit
         self._alert = alert
+        self._password = password
         self.sender_factory = sender_factory
+        self.menu_factory = menu_factory
         self.connected = connected
+        self.title_reliable = title_reliable
         self.rng = rng or random.Random()
         self.clock = clock
         self.state = OK
         self._events: queue.Queue = queue.Queue()
+        self._pending: list[tuple[str, str]] = []      # zdarzenia pobrane z kolejki, a jeszcze nie „zużyte”
         self._log: deque[str] = deque(maxlen=LOG_TAIL_LINES)
         self._lost_since: float | None = None
         self._error_alerted = False
+        self._last_text = ""        # tekst ostatniego zdarzenia zwróconego z _wait_kinds
 
     # ---------- wejście zdarzeń (z wątku LogTail) ----------
 
     def feed(self, ev: W.LogEvent) -> None:
         self._log.append(ev.raw)
-        if ev.kind in (W.MOVED_TO_LOBBY, W.LOBBY, W.DISCONNECTED, W.BAN, W.IN_GAME):
-            self._events.put(ev.kind)
+        if ev.kind in _FED:
+            self._events.put((ev.kind, ev.text))
 
-    def _drain(self) -> set[str]:
-        kinds = set()
+    def _pull(self) -> None:
         while True:
             try:
-                kinds.add(self._events.get_nowait())
+                self._pending.append(self._events.get_nowait())
             except queue.Empty:
-                return kinds
+                return
+
+    def _drain(self) -> list[tuple[str, str]]:
+        """Zabiera wszystkie zdarzenia (zarówno z kolejki, jak i z bufora)."""
+        self._pull()
+        items, self._pending = self._pending, []
+        return items
 
     # ---------- pomocnicze ----------
 
@@ -141,11 +168,43 @@ class Rejoiner:
         if tail:
             self.emit("Ostatnie linie logu:\n" + tail)
 
+    def _wait_kinds(self, wanted: set[str], seconds: float | None, title_check: bool = True,
+                    ignore_disconnect: bool = False) -> str:
+        """Czeka na jedno z `wanted`. Zwraca jego rodzaj albo: ban / disconnected (zdarzenie lub, przy
+        title_check, utrata tytułu „Multiplayer”) / stop / timeout. `seconds=None` = bez limitu.
+        `ignore_disconnect`: wpisy „Client disconnected” są oczekiwane (trwa powrót) i nie przerywają czekania."""
+        deadline = None if seconds is None else self.clock() + seconds
+        while True:
+            if self.stop.is_set() or not self.miner.is_alive():
+                return "stop"
+            self._pull()
+            kinds = [k for k, _ in self._pending]
+            if W.BAN in kinds:
+                self._pending.clear()
+                return W.BAN
+            # Zużywamy zdarzenia tylko do pierwszego szukanego; kolejne zostają dla następnego czekania
+            # (np. „Connecting to” i zaraz „Zaloguj się…” w jednym obrocie pętli).
+            for i, (kind, text) in enumerate(self._pending):
+                if kind in wanted:
+                    self._last_text = text
+                    del self._pending[: i + 1]
+                    return kind
+            self._pending.clear()
+            if (W.DISCONNECTED in kinds and not ignore_disconnect) or (title_check and self._window_lost()):
+                return W.DISCONNECTED
+            if deadline is not None and self.clock() >= deadline:
+                return "timeout"
+            self.stop.wait(TICK)
+
+    def _wait_for(self, seconds: float | None) -> str:
+        """Poziom 0: czekanie na wejście do gry."""
+        return self._wait_kinds({W.IN_GAME}, seconds)
+
     # ---------- główna pętla (wołana z Account) ----------
 
     def poll(self) -> bool:
         """Sprawdza, czy trzeba odzyskiwać połączenie. Blokuje do końca odzyskiwania i zwraca True."""
-        kinds = self._drain()
+        kinds = {k for k, _ in self._drain()}
         if self.state == BANNED:
             return False
         trigger = None
@@ -172,23 +231,173 @@ class Rejoiner:
         while True:
             if outcome == "stop":
                 return
-            if outcome == "ban":
+            if outcome == W.BAN:
                 self.state = BANNED
                 self._note("Błąd: zbanowano")
                 self.emit("⛔ ban — nie wracam na serwer")
                 return
-            if outcome == "in_game":
+            if outcome == W.IN_GAME:
                 return self._finish(started)
             if outcome == "error":
                 return
-            if outcome == "disconnected":
-                outcome = self._await_manual_return()
-            elif outcome == "lobby":
+            if outcome == W.DISCONNECTED:
+                outcome = self._level1()
+            elif outcome == W.LOBBY:
                 outcome = self._level0()
             else:
                 raise ValueError(outcome)
 
-    # ---------- rozłączenie: czekamy na powrót ----------
+    # ---------- wspólne: seria prób → alert → wolne ponawianie ----------
+
+    def _rounds(self, run_attempt: Callable[[int, int], str], attempts: int, give_up: str,
+                wanted: set[str], ignore_disconnect: bool) -> str:
+        """Powtarza serie prób. `run_attempt(nr, ile)` zwraca "timeout" (nieudana) albo wynik końcowy.
+        `wanted` = zdarzenia kończące czekanie między próbami (powrót zrobił się sam)."""
+        r = self.rcfg
+        backoff = r.backoff_s or [10.0]
+        first_round = True
+        while True:
+            for attempt in range(attempts):
+                res = run_attempt(attempt, attempts)
+                if res != "timeout":
+                    return res
+                if attempt + 1 < attempts:
+                    res = self._wait_kinds(wanted, self._jit(backoff[min(attempt, len(backoff) - 1)]),
+                                           title_check=False, ignore_disconnect=ignore_disconnect)
+                    if res != "timeout":
+                        return res
+            if first_round:
+                self._fail(give_up)
+                first_round = False
+            else:
+                self._note("Błąd: nie udało się wrócić na serwer")
+                self.emit("❌ kolejna seria prób nieudana")
+            if r.slow_retry:
+                self.emit(f"↻ wolne ponawianie: kolejna próba za {r.slow_retry_min:g} min")
+                res = self._wait_kinds(wanted, r.slow_retry_min * 60, title_check=False,
+                                       ignore_disconnect=ignore_disconnect)
+            else:
+                res = self._wait_kinds(wanted, None, title_check=False, ignore_disconnect=ignore_disconnect)
+            if res != "timeout":
+                return res
+            self._note("Odzyskiwanie")
+
+    # ---------- poziom 1: rozłączenie → menu → serwer → logowanie ----------
+
+    def _level1(self) -> str:
+        r, p = self.rcfg, self.profile
+        if not r.menu_keys or r.max_attempts_l1 <= 0 or p is None:
+            return self._await_manual_return()
+        self.emit("↻ rozłączono — wracam przez menu gry")
+        self._note("Odzyskiwanie")
+        res = self._wait_kinds({W.IN_GAME, W.LOBBY}, MENU_SETTLE_S, title_check=False)
+        if res != "timeout":
+            return res
+        return self._rounds(self._attempt_menu, max(1, r.max_attempts_l1),
+                            "Po nawigacji przez menu bot nie wrócił na serwer (sprawdź sekwencję klawiszy "
+                            "w Zaawansowanych i czy serwer działa). Kopanie wstrzymane.",
+                            wanted={W.IN_GAME, W.LOBBY}, ignore_disconnect=True)
+
+    def _attempt_menu(self, attempt: int, attempts: int) -> str:
+        r, p = self.rcfg, self.profile
+        self.emit(f"↻ próba {attempt + 1}/{attempts}: powrót przez menu")
+        self._drain()
+        # Sprawdzamy, czy okno naprawdę jest poza światem (Enter w grze mógłby coś zrobić).
+        if self.title_reliable(self.hwnd):
+            deadline = self.clock() + TITLE_WAIT_S
+            while self.connected(self.hwnd) and self.clock() < deadline:
+                if self.stop.wait(TICK):
+                    return "stop"
+            if self.connected(self.hwnd):
+                self.emit("ℹ okno wygląda na połączone — przechodzę do powrotu z lobby")
+                return W.LOBBY
+        try:
+            navigator = self.menu_factory(self.hwnd, self.stop)
+            with self.gate.turn(self.stop):
+                navigator.run(r.menu_keys)
+        except ChatAborted:
+            return "stop"
+        except ChatError as e:
+            self.emit(f"⚠ nie wysłano klawiszy menu: {e}")
+            return "timeout"
+
+        # Czekamy, aż gra zacznie łączyć się z serwerem.
+        stage = {W.CONNECTING, W.LOGIN_PROMPT, W.LOGGED_IN, W.LOBBY, W.IN_GAME}
+        res = self._wait_kinds(stage, r.connect_timeout_s, title_check=False)
+        if res == "timeout":
+            self.emit("⚠ po klawiszach menu gra nie zaczęła łączyć z serwerem")
+            return "timeout"
+        if res == W.DISCONNECTED:
+            return "timeout"
+        if res == W.CONNECTING and not self._address_ok(self._last_text):
+            self.emit(f"⚠ gra łączy z innym serwerem niż profil ({self._last_text}); anuluję")
+            self._cancel_connecting()
+            return "timeout"
+        if res in (W.IN_GAME, W.LOBBY, W.BAN, "stop"):
+            return res
+
+        # Logowanie i wejście do lobby.
+        logged_in_sent = False
+        if res == W.LOGIN_PROMPT:       # prośba o logowanie przyszła już w trakcie czekania na połączenie
+            outcome = self._send_login()
+            if outcome != "ok":
+                return outcome
+            logged_in_sent = True
+        deadline = self.clock() + r.login_timeout_s
+        while True:
+            left = deadline - self.clock()
+            if left <= 0:
+                self.emit("⚠ brak wejścia do lobby w czasie logowania")
+                return "timeout"
+            res = self._wait_kinds({W.LOGIN_PROMPT, W.LOGGED_IN, W.LOBBY, W.IN_GAME}, left, title_check=False)
+            if res in (W.LOBBY, W.IN_GAME, W.BAN, "stop"):
+                return res
+            if res in ("timeout", W.DISCONNECTED):
+                return "timeout"
+            if res == W.LOGIN_PROMPT and not logged_in_sent:
+                outcome = self._send_login()
+                if outcome != "ok":
+                    return outcome
+                logged_in_sent = True
+
+    def _address_ok(self, text: str) -> bool:
+        """„Connecting to bfsmc.pl, 25565”: adres musi zgadzać się z profilem (puste = nie sprawdzamy)."""
+        address = (self.profile.address if self.profile else "").strip().lower()
+        if not address:
+            return True
+        host = text.lower().removeprefix("connecting to ").split(",")[0].strip()
+        return host == address.split(":")[0]
+
+    def _cancel_connecting(self) -> None:
+        try:
+            self.menu_factory(self.hwnd, self.stop).run(["ESCAPE"])
+        except (ChatError, ChatAborted):
+            pass
+
+    def _send_login(self) -> str:
+        """Wpisuje komendę logowania z hasłem konta. Hasło nigdy nie trafia do komunikatów."""
+        p = self.profile
+        template = p.login_command.strip() if p else ""
+        if not template:
+            return "ok"
+        password = self._password()
+        if "{password}" in template and not password:
+            self._fail("Serwer prosi o logowanie, a konto nie ma zapisanego hasła (zakładka Konta).")
+            return "error"
+        command = template.replace("{password}", password)
+        self.emit("🔑 wpisuję komendę logowania")
+        try:
+            sender = self.sender_factory(self.hwnd, self.chat_key, self.stop)
+            with self.gate.turn(self.stop):
+                sender.send(command)
+        except ChatAborted:
+            return "stop"
+        except ChatError as e:
+            self.emit(f"⚠ nie wysłano komendy logowania: {e}")
+            return "timeout"
+        return "ok"
+
+    # ---------- rozłączenie bez poziomu 1: czekamy na powrót ----------
 
     def _await_manual_return(self) -> str:
         self._note("Rozłączono, czekam na powrót")
@@ -198,13 +407,13 @@ class Rejoiner:
         while True:
             if self.stop.is_set() or not self.miner.is_alive():
                 return "stop"
-            kinds = self._drain()
+            kinds = {k for k, _ in self._drain()}
             if W.BAN in kinds:
-                return "ban"
+                return W.BAN
             if W.IN_GAME in kinds:
-                return "in_game"
+                return W.IN_GAME
             if W.LOBBY in kinds or W.MOVED_TO_LOBBY in kinds:
-                return "lobby"
+                return W.LOBBY
             if not alerted and self.clock() - started >= HOLD_ALERT_S:
                 alerted = True
                 self._fail(f"Konto rozłączone od {HOLD_ALERT_S / 60:.0f} min i nie wróciło na serwer.")
@@ -217,47 +426,25 @@ class Rejoiner:
         if p is None or not p.lobby_commands:
             self._fail("Profil serwera nie ma komend lobby → gra, więc bot nie wie, jak wrócić do trybu gry.")
             return "error"
-        self.emit("↻ przeniesiono do lobby — wracam do trybu gry")
+        self.emit("↻ w lobby — wracam do trybu gry")
+        self._note("Odzyskiwanie")
         res = self._wait_for(self._jit(r.pause_before_s))
         if res != "timeout":
             return res
-        attempts = max(1, r.max_attempts_l0)
-        backoff = r.backoff_s or [10.0]
-        first_round = True
-        while True:
-            for attempt in range(attempts):
-                res = self._attempt(attempt, attempts)
-                if res != "timeout":
-                    return res
-                if attempt + 1 < attempts:
-                    res = self._wait_for(self._jit(backoff[min(attempt, len(backoff) - 1)]))
-                    if res != "timeout":
-                        return res
-            if first_round:
-                self._fail(f"Po {attempts} próbach nie ma potwierdzenia wejścia do trybu gry "
-                           "(awaria serwera?). Kopanie wstrzymane.")
-                first_round = False
-            else:
-                self._note("Błąd: nie udało się wrócić na serwer")
-                self.emit("❌ kolejna seria prób nieudana")
-            if r.slow_retry:
-                self.emit(f"↻ wolne ponawianie: kolejna próba za {r.slow_retry_min:g} min")
-                res = self._wait_for(r.slow_retry_min * 60)
-            else:
-                res = self._wait_for(None)
-            if res != "timeout":
-                return res
-            self._note("Odzyskiwanie")
+        return self._rounds(self._attempt, max(1, r.max_attempts_l0),
+                            f"Po {max(1, r.max_attempts_l0)} próbach nie ma potwierdzenia wejścia do trybu gry "
+                            "(awaria serwera?). Kopanie wstrzymane.",
+                            wanted={W.IN_GAME}, ignore_disconnect=False)
 
     def _attempt(self, attempt: int, attempts: int) -> str:
-        """Jedna próba: komendy lobby → czekanie na wejście do gry. Zwraca wynik _wait_for."""
+        """Jedna próba poziomu 0: komendy lobby → czekanie na wejście do gry."""
         p, r = self.profile, self.rcfg
         self.emit(f"↻ próba {attempt + 1}/{attempts}: " + " | ".join(p.lobby_commands))
         try:
             sender = self.sender_factory(self.hwnd, self.chat_key, self.stop)
             with self.gate.turn(self.stop):
                 if not self.connected(self.hwnd):
-                    return "disconnected"
+                    return W.DISCONNECTED
                 for i, command in enumerate(p.lobby_commands):
                     if i and self.stop.wait(COMMAND_GAP):
                         return "stop"
@@ -268,23 +455,6 @@ class Rejoiner:
             self.emit(f"⚠ nie wysłano komendy: {e}")
             return "timeout"
         return self._wait_for(r.join_timeout_s)
-
-    def _wait_for(self, seconds: float | None) -> str:
-        """Czeka na zdarzenie: in_game / ban / disconnected / stop albo timeout (None = bez limitu)."""
-        deadline = None if seconds is None else self.clock() + seconds
-        while True:
-            if self.stop.is_set() or not self.miner.is_alive():
-                return "stop"
-            kinds = self._drain()
-            if W.BAN in kinds:
-                return "ban"
-            if W.IN_GAME in kinds:
-                return "in_game"
-            if W.DISCONNECTED in kinds or self._window_lost():
-                return "disconnected"
-            if deadline is not None and self.clock() >= deadline:
-                return "timeout"
-            self.stop.wait(TICK)
 
     # ---------- koniec odzyskiwania ----------
 

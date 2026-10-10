@@ -65,56 +65,74 @@ class AdvancedTab:
         ctk.CTkLabel(card, text="POWRÓT NA SERWER", font=f["label_md"], text_color=T.ACCENT).grid(
             row=0, column=0, sticky="w", padx=T.PAD, pady=(12, 0))
         self.rejoin_enabled = ctk.CTkCheckBox(
-            card, text="Automatycznie wracaj na serwer (restart serwera, przeniesienie do lobby)",
+            card, text="Automatycznie wracaj na serwer (restart serwera, przeniesienie do lobby, rozłączenie)",
             font=f["body"], text_color=T.TEXT, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
             checkmark_color=T.ACCENT_TEXT)
         self.rejoin_enabled.grid(row=1, column=0, sticky="w", padx=T.PAD, pady=(8, 0))
         if r.enabled:
             self.rejoin_enabled.select()
-        ctk.CTkLabel(card, text="Po przeniesieniu do lobby bot wstrzymuje kopanie, wpisuje komendy lobby → gra z profilu "
-                                "serwera, czeka na potwierdzenie wejścia do gry i wznawia kopanie. Po rozłączeniu "
-                                "wstrzymuje kopanie i wznawia je, gdy konto wróci na serwer.",
+        ctk.CTkLabel(card, text="Lobby: bot wstrzymuje kopanie, wpisuje komendy lobby → gra z profilu serwera, czeka na "
+                                "potwierdzenie wejścia do gry i wznawia kopanie. Rozłączenie: bot naciska klawisze w "
+                                "menu (ekran „Disconnected” → lista serwerów → dołącz), loguje się hasłem konta i wraca "
+                                "jak z lobby.",
                      font=f["label_sm"], text_color=T.TEXT_MUTED, wraplength=820, justify="left",
                      anchor="w").grid(row=2, column=0, sticky="w", padx=T.PAD, pady=(2, 0))
-        self.pause_before = self._row(card, 3, "Pauza przed pierwszą próbą [s]", f"{r.pause_before_s:g}")
-        self.join_timeout = self._row(card, 6, "Czas oczekiwania na wejście do gry [s]", f"{r.join_timeout_s:g}")
-        self.max_attempts = self._row(card, 9, "Liczba prób w serii", str(r.max_attempts_l0))
-        self.backoff = self._row(card, 12, "Odstępy między próbami [s], po przecinku",
-                                 ", ".join(f"{x:g}" for x in r.backoff_s),
-                                 "Kolejne wartości dla kolejnych prób; ostatnia powtarza się, jeśli prób jest więcej.")
-        self.gate_spacing = self._row(card, 15, "Odstęp między kontami [s]", f"{r.gate_spacing_s:g}",
-                                      "Po restarcie serwera konta wracają po kolei, z tym minimalnym odstępem.")
+
+        row = [3]
+
+        def field(caption: str, value: str, hint: str = "") -> ctk.CTkEntry:
+            entry = self._row(card, row[0], caption, value, hint)
+            row[0] += 3
+            return entry
+
+        self.pause_before = field("Lobby: pauza przed pierwszą próbą [s]", f"{r.pause_before_s:g}")
+        self.join_timeout = field("Lobby: czas oczekiwania na wejście do gry [s]", f"{r.join_timeout_s:g}")
+        self.max_attempts = field("Lobby: liczba prób w serii", str(r.max_attempts_l0))
+        self.menu_keys = field("Rozłączenie: klawisze w menu, po przecinku", ", ".join(r.menu_keys),
+                               "Klawisze: TAB, ENTER, ESC, DOWN, UP… oraz wait:<sekundy>. Domyślnie: TAB (fokus na "
+                               "„Back to Server List”), ENTER, 2 s przerwy, ENTER (dołącz do zaznaczonego serwera). "
+                               "Sprawdź na jednym koncie: python devtools.py keys <instancja> TAB ENTER …")
+        self.max_attempts_l1 = field("Rozłączenie: liczba prób przez menu", str(r.max_attempts_l1))
+        self.connect_timeout = field("Rozłączenie: czas na połączenie z serwerem [s]", f"{r.connect_timeout_s:g}")
+        self.login_timeout = field("Rozłączenie: czas na logowanie i wejście do lobby [s]", f"{r.login_timeout_s:g}")
+        self.backoff = field("Odstępy między próbami [s], po przecinku", ", ".join(f"{x:g}" for x in r.backoff_s),
+                             "Kolejne wartości dla kolejnych prób; ostatnia powtarza się, jeśli prób jest więcej.")
+        self.gate_spacing = field("Odstęp między kontami [s]", f"{r.gate_spacing_s:g}",
+                                  "Po restarcie serwera konta wracają po kolei, z tym minimalnym odstępem.")
         self.slow_retry = ctk.CTkCheckBox(card, text="Po wyczerpaniu prób ponawiaj powoli (np. gdy serwer leży)",
                                           font=f["body"], text_color=T.TEXT, fg_color=T.ACCENT,
                                           hover_color=T.ACCENT_HOVER, checkmark_color=T.ACCENT_TEXT)
-        self.slow_retry.grid(row=18, column=0, sticky="w", padx=T.PAD, pady=(10, 0))
+        self.slow_retry.grid(row=row[0], column=0, sticky="w", padx=T.PAD, pady=(10, 0))
+        row[0] += 1
         if r.slow_retry:
             self.slow_retry.select()
-        self.slow_min = self._row(card, 19, "Wolne ponawianie co [min]", f"{r.slow_retry_min:g}")
+        self.slow_min = field("Wolne ponawianie co [min]", f"{r.slow_retry_min:g}")
         ctk.CTkButton(card, text="Zapisz", width=90, height=34, corner_radius=T.RADIUS_CTRL, font=f["label"],
                       fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, text_color=T.ACCENT_TEXT,
-                      command=self.save_rejoin).grid(row=22, column=0, sticky="w", padx=T.PAD, pady=(10, 14))
+                      command=self.save_rejoin).grid(row=row[0], column=0, sticky="w", padx=T.PAD, pady=(10, 14))
+
+    @staticmethod
+    def _split(text: str) -> list[str]:
+        return [x.strip() for x in text.replace(";", ",").split(",") if x.strip()]
 
     def save_rejoin(self) -> None:
         from dataclasses import replace
-        try:
-            backoff = [float(x.strip().replace(",", ".")) for x in self.backoff.get().replace(";", ",").split(",")
-                       if x.strip()]
-        except ValueError:
-            backoff = None
+        num = lambda entry: float(entry.get().strip().replace(",", "."))  # noqa: E731
         try:
             fields = dict(
                 enabled=bool(self.rejoin_enabled.get()),
-                pause_before_s=float(self.pause_before.get().replace(",", ".")),
-                join_timeout_s=float(self.join_timeout.get().replace(",", ".")),
+                pause_before_s=num(self.pause_before),
+                join_timeout_s=num(self.join_timeout),
                 max_attempts_l0=int(self.max_attempts.get().strip()),
-                backoff_s=backoff,
-                gate_spacing_s=float(self.gate_spacing.get().replace(",", ".")),
+                menu_keys=self._split(self.menu_keys.get()),
+                max_attempts_l1=int(self.max_attempts_l1.get().strip()),
+                connect_timeout_s=num(self.connect_timeout),
+                login_timeout_s=num(self.login_timeout),
+                backoff_s=[float(x.replace(",", ".")) for x in self._split(self.backoff.get())],
+                gate_spacing_s=num(self.gate_spacing),
                 slow_retry=bool(self.slow_retry.get()),
-                slow_retry_min=float(self.slow_min.get().replace(",", ".")))
+                slow_retry_min=num(self.slow_min))
         except ValueError:
-            fields = None
-        if fields is None or backoff is None:
             self.app.set_info("Niepoprawna liczba w ustawieniach powrotu na serwer.", error=True)
             return
         error = self.app.apply_rejoin_settings(replace(self.app.cfg.rejoin, **fields))

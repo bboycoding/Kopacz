@@ -771,7 +771,8 @@ class App(ctk.CTk):
         if rcfg.enabled:
             def factory(stop, acc=acc, profile=profile):
                 return Rejoiner(acc, profile, rcfg, miner, window.hwnd, rcfg.chat_key, stop,
-                                self.rejoin_gate, emit, alert)
+                                self.rejoin_gate, emit, alert,
+                                password=lambda: self.secrets.password_for(acc.id))
 
         runner = Account(acc, miner, window.hwnd, chat_key=rcfg.chat_key, stabilize_s=rcfg.stabilize_s,
                          emit=emit, rejoiner_factory=factory)

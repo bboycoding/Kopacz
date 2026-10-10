@@ -75,3 +75,50 @@ class ChatSender:
             raise
         except Exception as e:  # noqa: BLE001 — pywintypes.error przy zniknięciu okna
             raise ChatError(f"Błąd wysyłania: {e}") from e
+
+
+def parse_menu_keys(tokens: list[str]) -> list[tuple[str, float | int]]:
+    """Tokeny sekwencji menu: nazwa klawisza (TAB, ENTER, DOWN, …) albo `wait:<sekundy>`.
+    Zwraca listę ("key", vk) / ("wait", sekundy); ValueError przy błędnym tokenie."""
+    parsed: list[tuple[str, float | int]] = []
+    for token in tokens:
+        token = token.strip()
+        if token.lower().startswith("wait:"):
+            try:
+                seconds = float(token[5:].replace(",", "."))
+            except ValueError:
+                raise ValueError(f"Niepoprawny czas w „{token}”.") from None
+            if not 0 <= seconds <= 60:
+                raise ValueError(f"Czas w „{token}” musi być w zakresie 0–60 s.")
+            parsed.append(("wait", seconds))
+        else:
+            parsed.append(("key", key_to_vk(token)))
+    return parsed
+
+
+class MenuNavigator:
+    """Naciska klawisze w menu gry (ekran rozłączenia → lista serwerów → dołączenie) przez PostMessage."""
+
+    def __init__(self, hwnd: int, stop_event: threading.Event | None = None, key_gap: float = 0.3):
+        self.hwnd = hwnd
+        self.stop_event = stop_event or threading.Event()
+        self.key_gap = key_gap
+        self.backend = PostMessageBackend(hwnd)
+
+    def run(self, tokens: list[str]) -> None:
+        steps = parse_menu_keys(tokens)
+        if not is_alive(self.hwnd):
+            raise ChatError("Okno gry jest zamknięte.")
+        try:
+            for kind, value in steps:
+                if kind == "wait":
+                    if self.stop_event.wait(value):
+                        raise ChatAborted()
+                else:
+                    tap(self.backend, value)
+                    if self.stop_event.wait(self.key_gap):
+                        raise ChatAborted()
+        except ChatAborted:
+            raise
+        except Exception as e:  # noqa: BLE001 — pywintypes.error przy zniknięciu okna
+            raise ChatError(f"Błąd wysyłania klawiszy: {e}") from e
