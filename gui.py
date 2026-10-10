@@ -1,4 +1,5 @@
 """Okno aplikacji (customtkinter)."""
+import string
 import threading
 import time
 import tkinter as tk
@@ -6,10 +7,14 @@ from dataclasses import replace
 
 import customtkinter as ctk
 
+import launcher as L
 import theme as T
-from config import Config, load_config, save_config
+from config import AccountCfg, Config, LauncherCfg, load_config, save_config
+from gui_tabs.accounts_tab import AccountEditor, AccountsTab
+from gui_tabs.advanced_tab import AdvancedTab
 from hotkey import GlobalHotkey
 from miner import Miner, run_action
+from secrets_store import load_secrets, save_secrets
 from win_input import VK_F8, key_to_vk
 from windows import McWindow, find_minecraft_windows, flash_window
 
@@ -64,7 +69,14 @@ class WindowRow:
         self.title = ctk.CTkLabel(names, text=title, font=f["headline_sm"], text_color=T.TEXT,
                                   anchor="w", height=20)
         self.title.pack(fill="x")
-        self._sub_text = f"PID {window.pid} · hwnd {window.hwnd}"
+        self.instance_id = app.window_instance.get(window.hwnd, "")
+        account = app.account_for_instance(self.instance_id)
+        if account:
+            self._sub_text = f"{account.nick or account.name} · instancja {self.instance_id} · PID {window.pid}"
+        elif self.instance_id:
+            self._sub_text = f"instancja {self.instance_id} · brak konta · PID {window.pid}"
+        else:
+            self._sub_text = f"PID {window.pid} · hwnd {window.hwnd}"
         self.sub = ctk.CTkLabel(names, text=self._sub_text, font=f["body_sm"], text_color=T.TEXT_MUTED,
                                 anchor="w", height=16)
         self.sub.pack(fill="x")
@@ -96,6 +108,9 @@ class WindowRow:
         self.show = app.secondary_button(self.frame, f"{T.ICONS['show']}  Pokaż",
                                          lambda: flash_window(window.hwnd), width=84)
         self.show.grid(row=0, column=5, padx=(0, 12))
+        if self.instance_id and not account:
+            app.secondary_button(self.frame, "+ Konto", lambda: app.add_account_from_window(self.instance_id),
+                                 width=72).grid(row=0, column=6, padx=(0, 12))
         self._style_button(running=False)
 
     def _on_check(self) -> None:
@@ -150,6 +165,10 @@ class App(ctk.CTk):
         self.minsize(900, 700)
 
         self.cfg = load_config()
+        self.secrets = load_secrets()
+        self.instances: list[L.Instance] = []
+        self.profile_names: list[str] = []
+        self.window_instance: dict[int, str] = {}   # hwnd → ID instancji (z linii poleceń procesu)
         self.miners: dict[int, Miner] = {}
         self.rows: dict[int, WindowRow] = {}
         self._action_stop = threading.Event()
@@ -162,6 +181,8 @@ class App(ctk.CTk):
         self._pulse_job = None
         self._info_color = T.ACCENT
 
+        self._autodetect_launcher()
+        self.reload_instances()
         self._build()
         self.refresh_windows()
 
@@ -171,6 +192,8 @@ class App(ctk.CTk):
             self.set_info("Nie udało się zarejestrować F8 (zajęty przez inny program).", error=True)
         if self.cfg.load_error:
             self.set_info(self.cfg.load_error, error=True)
+        elif self.secrets.load_error:
+            self.set_info(self.secrets.load_error, error=True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(TICK_MS, self._tick)
@@ -244,9 +267,24 @@ class App(ctk.CTk):
         self.secondary_button(header, f"{T.ICONS['refresh']}  Odśwież", self.refresh_windows,
                               width=110, height=34).grid(row=0, column=2, rowspan=2)
 
+        # --- zakładki ---
+        self.tabs = ctk.CTkTabview(
+            self, fg_color=T.APP_BG, segmented_button_fg_color=T.CARD,
+            segmented_button_selected_color=T.ACCENT, segmented_button_selected_hover_color=T.ACCENT_HOVER,
+            segmented_button_unselected_color=T.CARD, segmented_button_unselected_hover_color=T.BORDER,
+            text_color=T.TEXT, border_width=0, corner_radius=T.RADIUS_CARD)
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=T.PAD - 6, pady=(0, 4))
+        self.tabs._segmented_button.configure(font=f["label"])
+        body = self.tabs.add("Kopanie")
+        accounts_tab = self.tabs.add("Konta")
+        advanced_tab = self.tabs.add("Zaawansowane")
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+        outer = {"padx": 0}
+
         # --- karta: okna Minecrafta ---
-        windows_card = self._card(self)
-        windows_card.grid(row=1, column=0, sticky="nsew", pady=(0, T.GAP), **outer)
+        windows_card = self._card(body)
+        windows_card.grid(row=0, column=0, sticky="nsew", pady=(0, T.GAP), **outer)
         windows_card.grid_columnconfigure(0, weight=1)
         windows_card.grid_rowconfigure(1, weight=1)
         bar = ctk.CTkFrame(windows_card, fg_color="transparent")
@@ -267,8 +305,8 @@ class App(ctk.CTk):
         self.empty_label = ctk.CTkLabel(self.list_frame, text="", font=f["body"], text_color=T.TEXT_MUTED)
 
         # --- karta: ustawienia ---
-        settings = self._card(self)
-        settings.grid(row=2, column=0, sticky="ew", pady=(0, T.GAP), **outer)
+        settings = self._card(body)
+        settings.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP), **outer)
         settings.grid_columnconfigure((0, 1, 2), weight=1, uniform="col")
         ctk.CTkLabel(settings, text="USTAWIENIA", font=f["label"], text_color=T.TEXT, height=18).grid(
             row=0, column=0, sticky="w", padx=T.PAD, pady=(10, 6))
@@ -331,8 +369,8 @@ class App(ctk.CTk):
             ctk.CTkFrame(panel, fg_color="transparent", height=10).pack()
 
         # --- pasek: test i kalibracja ---
-        tools = self._card(self)
-        tools.grid(row=3, column=0, sticky="ew", pady=(0, T.GAP), **outer)
+        tools = self._card(body)
+        tools.grid(row=2, column=0, sticky="ew", pady=(0, T.GAP), **outer)
         self.secondary_button(tools, f"{T.ICONS['test']}  Test okna ({TEST_SECONDS:.0f} s)",
                               self.test_window).pack(side="left", padx=(12, 4), pady=10)
         self.secondary_button(tools, f"{T.ICONS['calibrate']}  Kalibruj: idź {CALIBRATION_BLOCKS} bloków",
@@ -346,8 +384,8 @@ class App(ctk.CTk):
                      text_color=T.TEXT_MUTED).pack(side="right", padx=(12, 8))
 
         # --- pasek akcji ---
-        actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.grid(row=4, column=0, sticky="ew", pady=(4, T.GAP + 2), **outer)
+        actions = ctk.CTkFrame(body, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="ew", pady=(4, 0), **outer)
         ctk.CTkButton(actions, text=f"{T.ICONS['start']}  Start zaznaczone", height=40,
                       corner_radius=T.RADIUS_CTRL, font=f["headline_sm"], fg_color=T.ACCENT,
                       hover_color=T.ACCENT_HOVER, text_color=T.ACCENT_TEXT,
@@ -362,12 +400,15 @@ class App(ctk.CTk):
         # --- pasek informacji ---
         info_bar = ctk.CTkFrame(self, fg_color=T.INPUT_BG, corner_radius=T.RADIUS_CTRL,
                                 border_width=1, border_color=T.BORDER)
-        info_bar.grid(row=5, column=0, sticky="ew", pady=(0, 12), **outer)
+        info_bar.grid(row=2, column=0, sticky="ew", pady=(0, 12), padx=T.PAD)
         self.info_dot = _dot(info_bar, T.ACCENT)
         self.info_dot.pack(side="left", padx=(12, 8), pady=9)
         self.info = ctk.CTkLabel(info_bar, text="", anchor="w", font=f["body_sm"], text_color=T.TEXT,
                                  height=16)
         self.info.pack(side="left", fill="x", expand=True, padx=(0, 12))
+
+        self._build_accounts_tab(accounts_tab)
+        self._build_advanced_tab(advanced_tab)
 
     def _on_backend_change(self, label: str) -> None:
         backend = next(k for k, v in BACKEND_LABELS.items() if v == label)
@@ -444,6 +485,11 @@ class App(ctk.CTk):
         # Okna z działającym kopaczem zostają na liście, nawet jeśli tytuł się zmienił.
         known = {w.hwnd for w in windows}
         windows += [m.window for h, m in self.miners.items() if h not in known and m.is_alive()]
+        self.window_instance = {}
+        for w in windows:
+            instance = L.instance_for_pid(w.pid)
+            if instance:
+                self.window_instance[w.hwnd] = instance
         if not windows:
             self.empty_label.configure(text="Nie znaleziono okien Minecrafta. Uruchom grę i kliknij „Odśwież”.")
             self.empty_label.grid(row=0, column=0, pady=20)
@@ -453,6 +499,8 @@ class App(ctk.CTk):
         for i, w in enumerate(windows):
             self.rows[w.hwnd] = WindowRow(self, self.list_frame, w, i)
         self._update_rows()
+        if hasattr(self, "accounts_tab"):
+            self.accounts_tab.refresh()
 
     def _selected_windows(self) -> list[McWindow]:
         return [r.window for r in self.rows.values() if r.selected.get()]
@@ -460,6 +508,114 @@ class App(ctk.CTk):
     def _running(self, hwnd: int) -> bool:
         m = self.miners.get(hwnd)
         return bool(m and m.is_alive())
+
+    # ---------- launcher, instancje, konta ----------
+
+    def _build_accounts_tab(self, parent) -> None:
+        self.accounts_tab = AccountsTab(self, parent)
+
+    def _build_advanced_tab(self, parent) -> None:
+        self.advanced_tab = AdvancedTab(self, parent)
+
+    def detect_launcher(self) -> tuple[str, str]:
+        return L.detect_launcher()
+
+    def _autodetect_launcher(self) -> None:
+        """Przy pierwszym starcie (puste ustawienia launchera) próbuje wykryć go samodzielnie."""
+        if self.cfg.launcher.exe or self.cfg.launcher.instances_dir:
+            return
+        exe, instances_dir = L.detect_launcher()
+        if exe or instances_dir:
+            self.cfg.launcher = LauncherCfg(exe, instances_dir, self.cfg.launcher.args_template)
+            try:
+                save_config(self.cfg)
+            except OSError:
+                pass
+
+    def reload_instances(self) -> None:
+        self.instances = L.list_instances(self.cfg.launcher.instances_dir)
+        self.profile_names = L.list_profile_names(self.cfg.launcher.instances_dir)
+
+    def apply_launcher(self, launcher_cfg: LauncherCfg, save: bool) -> str:
+        """Zwraca komunikat błędu albo pusty napis."""
+        known = {"instance", "server", "nick"}
+        try:
+            fields = {name for _, name, _, _ in string.Formatter().parse(launcher_cfg.args_template) if name}
+        except ValueError:
+            return "Szablon argumentów ma niedopasowane klamry."
+        if fields - known:
+            return f"Nieznane pola w szablonie: {', '.join(sorted(fields - known))}."
+        self.cfg.launcher = launcher_cfg
+        if save:
+            try:
+                save_config(self.cfg)
+            except OSError as e:
+                return f"Nie udało się zapisać ustawień: {e}"
+        self.reload_instances()
+        self.refresh_windows()
+        return ""
+
+    def account_for_instance(self, instance_id: str) -> AccountCfg | None:
+        if not instance_id:
+            return None
+        return next((a for a in self.cfg.accounts if a.instance_id == instance_id), None)
+
+    def new_account_id(self) -> str:
+        used = {a.id for a in self.cfg.accounts}
+        n = 1
+        while f"konto{n}" in used:
+            n += 1
+        return f"konto{n}"
+
+    def add_account_from_window(self, instance_id: str) -> None:
+        inst = next((i for i in self.instances if i.id == instance_id), None)
+        name = inst.name if inst else instance_id
+        editor = AccountEditor(self, None)
+        editor.name.insert(0, name)
+        editor.instance.set(instance_id)
+        if name in self.profile_names:
+            editor.nick.set(name)
+
+    def save_account(self, acc: AccountCfg, password: str) -> str:
+        """Zapisuje konto i hasło. Zwraca komunikat błędu albo pusty napis."""
+        accounts = list(self.cfg.accounts)
+        for i, existing in enumerate(accounts):
+            if existing.id == acc.id:
+                accounts[i] = acc
+                break
+        else:
+            accounts.append(acc)
+        try:
+            replace(self.cfg, accounts=accounts).validate()
+        except ValueError as e:
+            return str(e)
+        if password:
+            self.secrets.passwords[acc.id] = password
+        else:
+            self.secrets.passwords.pop(acc.id, None)
+        self.cfg.accounts = accounts
+        try:
+            save_config(self.cfg)
+            save_secrets(self.secrets)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        self.accounts_tab.refresh()
+        self.refresh_windows()
+        self.set_info(f"Zapisano konto „{acc.name}”.")
+        return ""
+
+    def delete_account(self, account_id: str) -> None:
+        self.cfg.accounts = [a for a in self.cfg.accounts if a.id != account_id]
+        self.secrets.passwords.pop(account_id, None)
+        try:
+            save_config(self.cfg)
+            save_secrets(self.secrets)
+        except OSError as e:
+            self.set_info(f"Nie udało się zapisać: {e}", error=True)
+            return
+        self.accounts_tab.refresh()
+        self.refresh_windows()
+        self.set_info("Usunięto konto.")
 
     # ---------- kopanie ----------
 
