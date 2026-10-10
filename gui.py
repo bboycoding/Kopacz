@@ -169,6 +169,8 @@ class App(ctk.CTk):
         self.hotkey.start()
         if not self.hotkey.wait_ready():
             self.set_info("Nie udało się zarejestrować F8 (zajęty przez inny program).", error=True)
+        if self.cfg.load_error:
+            self.set_info(self.cfg.load_error, error=True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(TICK_MS, self._tick)
@@ -401,7 +403,9 @@ class App(ctk.CTk):
                 return typ(self.entries[key].get().strip().replace(",", "."))
 
             backend = next(k for k, v in BACKEND_LABELS.items() if v == self.backend_var.get())
-            cfg = Config(
+            # replace(): zachowuje konta, serwery, Discord i resztę sekcji, których ten ekran nie edytuje.
+            cfg = replace(
+                self.cfg,
                 blocks=num("blocks", int),
                 sec_per_block=num("sec_per_block", float),
                 turn_pause=num("turn_pause", float),

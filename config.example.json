@@ -1,0 +1,96 @@
+{
+  "blocks": 27,
+  "sec_per_block": 0.1154,
+  "turn_pause": 0.3,
+  "key_right": "D",
+  "key_left": "A",
+  "wall_push_pct": 15.0,
+  "jitter_pct": 0.0,
+  "lmb_refresh_cycles": 5,
+  "backend": "postmessage",
+  "launcher": {
+    "exe": "",
+    "instances_dir": "",
+    "args_template": "-l {instance} -s {server} -a {nick}"
+  },
+  "discord": {
+    "enabled": false,
+    "batch_seconds": 5.0,
+    "max_chars": 1800,
+    "group_window_s": 20.0,
+    "status_every_min": 30.0,
+    "include": [],
+    "exclude": [
+      "zdobył klucz",
+      "Czyszczenie przedmiotów",
+      "Klatka Dusz",
+      "^\\s*[→←] "
+    ]
+  },
+  "rejoin": {
+    "enabled": false,
+    "chat_key": "T",
+    "menu_keys": [
+      "TAB",
+      "ENTER",
+      "wait:2",
+      "ENTER"
+    ],
+    "pause_before_s": 5.0,
+    "join_timeout_s": 20.0,
+    "backoff_s": [
+      10,
+      20,
+      40,
+      80,
+      160,
+      300
+    ],
+    "max_attempts_l0": 6,
+    "max_attempts_l1": 5,
+    "max_attempts_l2": 2,
+    "slow_retry": true,
+    "slow_retry_min": 30.0,
+    "gate_spacing_s": 10.0,
+    "stabilize_s": 60.0
+  },
+  "servers": [
+    {
+      "id": "bfsmc",
+      "name": "bfsmc.pl (przykład)",
+      "address": "bfsmc.pl",
+      "login_command": "/login {password}",
+      "lobby_commands": [
+        "/server skyblock"
+      ],
+      "pat_login_prompt": "Zaloguj się używając",
+      "pat_logged_in": "Pomyślnie zalogowano",
+      "pat_lobby": "WYBIERZ TRYB GRY",
+      "pat_in_game": "WITAMY NA SERWERZE SKYBLOCK",
+      "pat_moved_to_lobby": "Rozłączono z \\S+:",
+      "pat_ban": "(?i)zbanowan|you are banned",
+      "pat_player_chat": " » "
+    }
+  ],
+  "accounts": [
+    {
+      "id": "konto1",
+      "name": "Konto 1",
+      "nick": "MojNick",
+      "instance_id": "nazwa-instancji",
+      "log_path": "",
+      "server_id": "bfsmc",
+      "home_command": "/home kopanie",
+      "after_join_commands": [],
+      "schedule": [
+        {
+          "text": "/przyklad",
+          "every_min": 30,
+          "jitter_s": 60.0,
+          "on_missed": "defer"
+        }
+      ],
+      "enabled": true
+    }
+  ]
+}

@@ -3,3 +3,10 @@ __pycache__/
 build/
 dist/
 *.spec
+
+# Ustawienia lokalne i sekrety (nie wrzucać do repo)
+config.json
+config.json.bad
+config.json.tmp
+secrets.json
+secrets.json.tmp
