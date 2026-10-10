@@ -38,6 +38,33 @@ class AdvancedTab:
                       command=self.save).pack(side="left", padx=8)
         self.update_status()
 
+        chat_card = app._card(parent)
+        chat_card.grid(row=1, column=0, sticky="ew", pady=(T.GAP, 0))
+        chat_card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(chat_card, text="CZAT I KOMENDY", font=f["label_md"], text_color=T.ACCENT).grid(
+            row=0, column=0, sticky="w", padx=T.PAD, pady=(12, 0))
+        rejoin = app.cfg.rejoin
+        self.chat_key = self._row(chat_card, 1, "Klawisz otwierający czat", rejoin.chat_key,
+                                  "Domyślnie T (w options.txt: key_key.chat). Komendy z harmonogramu są wpisywane "
+                                  "przez ten klawisz, w tle, bez przejmowania myszy.")
+        self.stabilize = self._row(chat_card, 4, "Stabilizacja po powrocie [s]", f"{rejoin.stabilize_s:g}",
+                                   "Tyle sekund konto musi nieprzerwanie kopać, zanim wyśle odłożoną komendę.")
+        ctk.CTkButton(chat_card, text="Zapisz", width=90, height=34, corner_radius=T.RADIUS_CTRL, font=f["label"],
+                      fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, text_color=T.ACCENT_TEXT,
+                      command=self.save_chat).grid(row=7, column=0, sticky="w", padx=T.PAD, pady=(10, 14))
+
+    def save_chat(self) -> None:
+        try:
+            stabilize = float(self.stabilize.get().strip().replace(",", "."))
+        except ValueError:
+            self.app.set_info("Niepoprawna liczba w polu stabilizacji.", error=True)
+            return
+        error = self.app.apply_chat_settings(self.chat_key.get().strip().upper(), stabilize)
+        if error:
+            self.app.set_info(error, error=True)
+        else:
+            self.app.set_info("Zapisano ustawienia czatu.")
+
     def _row(self, card, row: int, caption: str, value: str, hint: str = "") -> ctk.CTkEntry:
         f = self.app.fonts
         ctk.CTkLabel(card, text=caption, font=f["body_sm"], text_color=T.TEXT_MUTED, anchor="w").grid(

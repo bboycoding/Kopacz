@@ -187,6 +187,13 @@ class Config:
             raise ValueError("Limity prób rejoinu nie mogą być ujemne.")
         if not r.backoff_s or any(x <= 0 for x in r.backoff_s):
             raise ValueError("Lista odstępów (backoff) musi zawierać liczby dodatnie.")
+        from win_input import key_to_vk
+        try:
+            key_to_vk(r.chat_key)
+        except ValueError as e:
+            raise ValueError(f"Klawisz czatu: {e}") from e
+        if not 0 <= r.stabilize_s <= 3600:
+            raise ValueError("Stabilizacja po powrocie musi być w zakresie 0–3600 s.")
         if r.slow_retry_min < 1:
             raise ValueError("Wolne ponawianie: minimum 1 minuta.")
 

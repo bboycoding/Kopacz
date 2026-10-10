@@ -11,6 +11,8 @@ import customtkinter as ctk
 import launcher as L
 import presets
 import theme as T
+from accounts import Account
+from chat import ChatError, ChatSender
 from config import AccountCfg, Config, DiscordCfg, LauncherCfg, ServerProfile, load_config, save_config
 from gui_tabs.accounts_tab import AccountEditor, AccountsTab
 from gui_tabs.advanced_tab import AdvancedTab
@@ -176,6 +178,7 @@ class App(ctk.CTk):
         self.profile_names: list[str] = []
         self.window_instance: dict[int, str] = {}   # hwnd → ID instancji (z linii poleceń procesu)
         self.monitor = Monitor(self._status_text)
+        self.runners: dict[int, Account] = {}     # hwnd → nadzorca konta (harmonogram komend)
         self.miners: dict[int, Miner] = {}
         self.rows: dict[int, WindowRow] = {}
         self._action_stop = threading.Event()
@@ -728,10 +731,74 @@ class App(ctk.CTk):
         miner = Miner(window, replace(cfg))
         self.miners[window.hwnd] = miner
         miner.start()
+        self._start_runner(window, miner)
+
+    def _start_runner(self, window: McWindow, miner: Miner) -> None:
+        old = self.runners.pop(window.hwnd, None)
+        if old:
+            old.stop()
+        acc = self.account_for_instance(self.window_instance.get(window.hwnd, ""))
+        if not (acc and acc.enabled and acc.schedule):
+            return
+
+        def emit(text: str, acc=acc) -> None:
+            notifier = self.monitor.notifier
+            if notifier:
+                notifier.line(acc.nick or acc.name or acc.instance_id, text)
+
+        runner = Account(acc, miner, window.hwnd, chat_key=self.cfg.rejoin.chat_key,
+                         stabilize_s=self.cfg.rejoin.stabilize_s, emit=emit)
+        self.runners[window.hwnd] = runner
+        runner.start()
+
+    def send_chat_now(self, instance_id: str, text: str) -> None:
+        """Przycisk „Teraz”: wpisuje komendę na czacie okna danej instancji."""
+        if not text:
+            self.set_info("Wpisz komendę do wysłania.", error=True)
+            return
+        hwnd = next((h for h, i in self.window_instance.items() if i == instance_id), None)
+        if hwnd is None:
+            self.set_info(f"Nie znaleziono okna gry dla instancji „{instance_id or '—'}”.", error=True)
+            return
+
+        def done(ok: bool, message: str) -> None:
+            self.after(0, lambda: self.set_info(f"Wysłano: {text}" if ok else f"Nie wysłano: {message}",
+                                                error=not ok))
+
+        runner = self.runners.get(hwnd)
+        if runner and runner.is_alive():
+            runner.send_now(text, done)
+            self.set_info("Komenda w kolejce (kopacz zostanie na chwilę wstrzymany)…")
+            return
+
+        def worker():
+            try:
+                ChatSender(hwnd, self.cfg.rejoin.chat_key).send(text)
+                done(True, "")
+            except ChatError as e:
+                done(False, str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def apply_chat_settings(self, chat_key: str, stabilize_s: float) -> str:
+        rejoin = replace(self.cfg.rejoin, chat_key=chat_key, stabilize_s=stabilize_s)
+        try:
+            replace(self.cfg, rejoin=rejoin).validate()
+        except ValueError as e:
+            return str(e)
+        self.cfg.rejoin = rejoin
+        try:
+            save_config(self.cfg)
+        except OSError as e:
+            return f"Nie udało się zapisać: {e}"
+        return ""
 
     def toggle_window(self, hwnd: int) -> None:
         if self._running(hwnd):
             self.miners[hwnd].stop()
+            runner = self.runners.get(hwnd)
+            if runner:
+                runner.stop()
             return
         cfg = self.read_settings()
         if cfg:
@@ -755,6 +822,8 @@ class App(ctk.CTk):
         self._action_stop.set()
         for m in self.miners.values():
             m.stop()
+        for r in self.runners.values():
+            r.stop()
 
     def _on_hotkey(self) -> None:
         # Wywoływane z wątku skrótu — tylko operacje bezpieczne wątkowo.
@@ -850,6 +919,8 @@ class App(ctk.CTk):
         self.stop_all()
         for m in self.miners.values():
             m.join(timeout=2)
+        for r in self.runners.values():
+            r.join(timeout=2)
         self.hotkey.stop()
         self.monitor.stop()
         self.destroy()

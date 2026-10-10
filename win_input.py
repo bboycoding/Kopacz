@@ -27,6 +27,11 @@ SPECIAL_KEYS = {
     "RIGHT": win32con.VK_RIGHT,
     "UP": win32con.VK_UP,
     "DOWN": win32con.VK_DOWN,
+    "TAB": win32con.VK_TAB,
+    "ENTER": win32con.VK_RETURN,
+    "ESCAPE": win32con.VK_ESCAPE,
+    "ESC": win32con.VK_ESCAPE,
+    "BACKSPACE": win32con.VK_BACK,
 }
 
 
@@ -104,6 +109,19 @@ class PostMessageBackend:
     def lmb_up(self) -> None:
         self._post(win32con.WM_LBUTTONUP, 0, self._center())
         self._lmb = False
+
+    def type_text(self, text: str, delay: float = 0.01) -> None:
+        """Wpisuje tekst jako WM_CHAR (gotowe znaki: polskie litery, '/', wielkie litery bez Shifta).
+        Znaki spoza BMP idą jako para surogatów, tak jak robi to Windows. Znaki sterujące są pomijane."""
+        for ch in text:
+            if ord(ch) < 32 or ord(ch) == 127:
+                continue
+            code = ord(ch)
+            units = [code] if code <= 0xFFFF else [0xD800 + ((code - 0x10000) >> 10),
+                                                    0xDC00 + ((code - 0x10000) & 0x3FF)]
+            for unit in units:
+                self._post(win32con.WM_CHAR, unit, 1)
+            time.sleep(delay)
 
     def hold_tick(self) -> None:
         # Jak autorepeat prawdziwej klawiatury.
@@ -200,6 +218,15 @@ class ForegroundBackend:
     def release_all(self) -> None:
         self._lmb_wanted = False
         self._release_physical()
+
+
+def tap(sender, vk: int, hold: float = 0.05) -> None:
+    """Krótkie wciśnięcie i puszczenie klawisza (np. otwarcie czatu, Enter)."""
+    sender.key_down(vk)
+    try:
+        time.sleep(hold)
+    finally:
+        sender.key_up(vk)
 
 
 def make_sender(backend: str, hwnd: int):

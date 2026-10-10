@@ -49,6 +49,19 @@ def is_alive(hwnd: int) -> bool:
     return bool(win32gui.IsWindow(hwnd))
 
 
+def is_connected(hwnd: int) -> bool:
+    """Czy okno gry jest w świecie (na serwerze). Tytuł okna GLFW (1.13+) zawiera wtedy
+    „Multiplayer” albo „Singleplayer”. Starsze okna LWJGL mają stały tytuł — tam nie da się
+    tego sprawdzić, więc zakładamy, że tak."""
+    try:
+        if win32gui.GetClassName(hwnd) == "LWJGL":
+            return True
+        title = win32gui.GetWindowText(hwnd)
+    except win32gui.error:
+        return False
+    return "Multiplayer" in title or "Singleplayer" in title
+
+
 def flash_window(hwnd: int) -> None:
     """Mignięcie okna na pasku zadań — żeby rozpoznać, które to okno."""
     try:

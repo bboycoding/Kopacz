@@ -4,6 +4,8 @@
   python devtools.py replay <plik> [preset]    — zdarzenia wykryte w starym logu (.log / .log.gz); preset: bfsmc, vanilla
   python devtools.py tail <id_instancji> [preset] — na żywo: zdarzenia z latest.log instancji (Ctrl+C kończy)
   python devtools.py discord-test              — wiadomość testowa na zapisany webhook
+  python devtools.py chat <id_instancji> "<tekst>" — wpisuje tekst/komendę na czacie okna instancji (PRAWDZIWA wysyłka)
+  python devtools.py keys <id_instancji> KLAWISZ... — naciska klawisze w oknie (np. TAB ENTER wait:2 ENTER)
   python devtools.py pause-test <id_instancji> [kopanie_s] [pauza_s]
                                                — na PRAWDZIWYM oknie: kopanie, pauza, wznowienie, stop
 """
@@ -14,7 +16,9 @@ import launcher as L
 import log_watcher as W
 import presets
 from config import load_config
+from chat import ChatError, ChatSender
 from miner import Miner
+from win_input import PostMessageBackend, key_to_vk, tap
 from discord_notify import DiscordNotifier, valid_webhook
 from secrets_store import load_secrets
 from windows import find_minecraft_windows
@@ -97,6 +101,42 @@ def cmd_discord_test() -> int:
     return 0 if ok else 1
 
 
+def _window_for(instance_id: str):
+    windows = [w for w in find_minecraft_windows() if L.instance_for_pid(w.pid) == instance_id]
+    if len(windows) != 1:
+        print(f"Znaleziono {len(windows)} okien dla instancji „{instance_id}” (potrzebne dokładnie 1).")
+        return None
+    return windows[0]
+
+
+def cmd_chat(instance_id: str, text: str) -> int:
+    window = _window_for(instance_id)
+    if window is None:
+        return 1
+    try:
+        ChatSender(window.hwnd, load_config().rejoin.chat_key).send(text)
+    except ChatError as e:
+        print(f"Nie wysłano: {e}")
+        return 1
+    print(f"Wysłano: {text}")
+    return 0
+
+
+def cmd_keys(instance_id: str, *keys: str) -> int:
+    window = _window_for(instance_id)
+    if window is None or not keys:
+        return 1
+    backend = PostMessageBackend(window.hwnd)
+    for key in keys:
+        if key.lower().startswith("wait:"):
+            time.sleep(float(key[5:]))
+        else:
+            tap(backend, key_to_vk(key))
+            time.sleep(0.3)
+        print(f"  {key}")
+    return 0
+
+
 def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> int:
     """Kopie `mine_s` s → pauza `pause_s` s → kopie 10 s → stop. Postać RUSZA SIĘ w grze — patrz na okno."""
     cfg = load_config()
@@ -133,7 +173,7 @@ def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> 
 
 
 COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test,
-            "pause-test": cmd_pause_test}
+            "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys}
 
 
 def main(argv: list[str]) -> int:
