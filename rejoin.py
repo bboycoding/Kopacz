@@ -6,9 +6,11 @@ wstrzymywany (żeby nie klikał w menu), a następnie:
   rozłączenie → klawisze w menu (ekran „Disconnected” → lista serwerów → dołącz) → czekanie na
                 „Connecting to” (i sprawdzenie adresu) → komenda logowania z hasłem → lobby → poziom 0
   ban         → tylko wstrzymanie (alert wysyła Monitor), bez ponawiania
+  restart     → (ostateczność: po wyczerpaniu poziomu 1 albo gdy okno gry zniknęło) łagodne zamknięcie
+                TYLKO tej instancji, uruchomienie przez launcher, przepięcie kopacza na nowe okno,
+                czekanie na automatyczne wejście na serwer i dalej jak po rozłączeniu
 Każdy poziom ponawia z rosnącym odstępem. Po wyczerpaniu prób: stan BŁĄD, alert z pingiem (raz)
 i opcjonalnie wolne ponawianie co N minut. Wszystkie czekania są przerywane stopem (F8, zamknięcie).
-Restart instancji (poziom 2) dojdzie w kolejnym kroku.
 """
 import queue
 import random
@@ -23,7 +25,8 @@ import win32gui
 import log_watcher as W
 from chat import ChatAborted, ChatError, ChatSender, MenuNavigator
 from config import AccountCfg, RejoinCfg, ServerProfile
-from windows import is_connected
+from launcher import RestartError
+from windows import McWindow, is_alive, is_connected
 
 TICK = 0.2
 COMMAND_GAP = 1.2           # przerwa między komendami wysyłanymi jedna po drugiej
@@ -81,6 +84,8 @@ class Rejoiner:
                  sender_factory=ChatSender, menu_factory=MenuNavigator,
                  connected: Callable[[int], bool] = is_connected,
                  title_reliable: Callable[[int], bool] = _title_reliable,
+                 restarter=None, on_rebind: Callable[[McWindow], None] | None = None,
+                 window_alive: Callable[[int], bool] = is_alive,
                  rng: random.Random | None = None, clock: Callable[[], float] = time.monotonic):
         self.acc = acc
         self.profile = profile
@@ -97,6 +102,9 @@ class Rejoiner:
         self.menu_factory = menu_factory
         self.connected = connected
         self.title_reliable = title_reliable
+        self.restarter = restarter              # GameRestarter albo None (poziom 2 niedostępny)
+        self.on_rebind = on_rebind
+        self.window_alive = window_alive
         self.rng = rng or random.Random()
         self.clock = clock
         self.state = OK
@@ -148,6 +156,8 @@ class Rejoiner:
         return seconds * self.rng.uniform(1 - frac, 1 + frac)
 
     def _window_lost(self) -> bool:
+        if not self.window_alive(self.hwnd):
+            return True                         # okno gry zniknęło (np. crash) — bez czekania
         if self.connected(self.hwnd):
             self._lost_since = None
             return False
@@ -241,7 +251,9 @@ class Rejoiner:
             if outcome == "error":
                 return
             if outcome == W.DISCONNECTED:
-                outcome = self._level1()
+                outcome = self._level1() if self.window_alive(self.hwnd) else "restart"
+            elif outcome == "restart":
+                outcome = self._level2()
             elif outcome == W.LOBBY:
                 outcome = self._level0()
             else:
@@ -250,7 +262,7 @@ class Rejoiner:
     # ---------- wspólne: seria prób → alert → wolne ponawianie ----------
 
     def _rounds(self, run_attempt: Callable[[int, int], str], attempts: int, give_up: str,
-                wanted: set[str], ignore_disconnect: bool) -> str:
+                wanted: set[str], ignore_disconnect: bool, one_round: bool = False) -> str:
         """Powtarza serie prób. `run_attempt(nr, ile)` zwraca "timeout" (nieudana) albo wynik końcowy.
         `wanted` = zdarzenia kończące czekanie między próbami (powrót zrobił się sam)."""
         r = self.rcfg
@@ -266,6 +278,8 @@ class Rejoiner:
                                            title_check=False, ignore_disconnect=ignore_disconnect)
                     if res != "timeout":
                         return res
+            if one_round:
+                return "exhausted"
             if first_round:
                 self._fail(give_up)
                 first_round = False
@@ -293,10 +307,15 @@ class Rejoiner:
         res = self._wait_kinds({W.IN_GAME, W.LOBBY}, MENU_SETTLE_S, title_check=False)
         if res != "timeout":
             return res
-        return self._rounds(self._attempt_menu, max(1, r.max_attempts_l1),
-                            "Po nawigacji przez menu bot nie wrócił na serwer (sprawdź sekwencję klawiszy "
-                            "w Zaawansowanych i czy serwer działa). Kopanie wstrzymane.",
-                            wanted={W.IN_GAME, W.LOBBY}, ignore_disconnect=True)
+        can_restart = self.restarter is not None and r.max_attempts_l2 > 0
+        res = self._rounds(self._attempt_menu, max(1, r.max_attempts_l1),
+                           "Po nawigacji przez menu bot nie wrócił na serwer (sprawdź sekwencję klawiszy "
+                           "w Zaawansowanych i czy serwer działa). Kopanie wstrzymane.",
+                           wanted={W.IN_GAME, W.LOBBY}, ignore_disconnect=True, one_round=can_restart)
+        if res == "exhausted":
+            self.emit("↻ powrót przez menu nie działa — ostateczność: restart instancji")
+            return "restart"
+        return res
 
     def _attempt_menu(self, attempt: int, attempts: int) -> str:
         r, p = self.rcfg, self.profile
@@ -321,11 +340,15 @@ class Rejoiner:
             self.emit(f"⚠ nie wysłano klawiszy menu: {e}")
             return "timeout"
 
-        # Czekamy, aż gra zacznie łączyć się z serwerem.
+        return self._join_phase(r.connect_timeout_s)
+
+    def _join_phase(self, connect_timeout: float) -> str:
+        """Po klawiszach menu albo po starcie gry: czekanie na łączenie, logowanie i wejście do lobby."""
+        r = self.rcfg
         stage = {W.CONNECTING, W.LOGIN_PROMPT, W.LOGGED_IN, W.LOBBY, W.IN_GAME}
-        res = self._wait_kinds(stage, r.connect_timeout_s, title_check=False)
+        res = self._wait_kinds(stage, connect_timeout, title_check=False)
         if res == "timeout":
-            self.emit("⚠ po klawiszach menu gra nie zaczęła łączyć z serwerem")
+            self.emit("⚠ gra nie zaczęła łączyć z serwerem")
             return "timeout"
         if res == W.DISCONNECTED:
             return "timeout"
@@ -359,6 +382,50 @@ class Rejoiner:
                 if outcome != "ok":
                     return outcome
                 logged_in_sent = True
+
+    # ---------- poziom 2: restart instancji ----------
+
+    def _level2(self) -> str:
+        r = self.rcfg
+        if self.restarter is None or r.max_attempts_l2 <= 0:
+            self._fail("Okno gry zostało zamknięte, a restart instancji jest niedostępny "
+                       "(ustaw launcher w Zaawansowanych i instancję w koncie).")
+            return self._wait_kinds({W.IN_GAME}, None, title_check=False, ignore_disconnect=True)
+        self.emit("♻ restart instancji gry")
+        self._note("Odzyskiwanie (restart gry)")
+        return self._rounds(self._attempt_restart, r.max_attempts_l2,
+                            "Restart instancji nie przywrócił konta na serwer. Kopanie wstrzymane.",
+                            wanted={W.IN_GAME, W.LOBBY}, ignore_disconnect=True)
+
+    def _attempt_restart(self, attempt: int, attempts: int) -> str:
+        r = self.rcfg
+        self.emit(f"♻ próba {attempt + 1}/{attempts}: zamykam i uruchamiam instancję")
+        old = self.hwnd
+        try:
+            with self.gate.turn(self.stop):
+                pids = self.restarter.close(self.stop)
+                if self.stop.is_set():
+                    return "stop"
+                self.emit("♻ zamknięto proces gry (PID " + ", ".join(map(str, pids)) + ")" if pids
+                          else "♻ proces gry już nie działał")
+                self.restarter.launch()
+        except ChatAborted:
+            return "stop"
+        except RestartError as e:
+            self.emit(f"⚠ {e}")
+            return "timeout"
+        window = self.restarter.wait_window(self.stop, {old})
+        if self.stop.is_set():
+            return "stop"
+        if window is None:
+            self.emit("⚠ nowe okno gry nie pojawiło się w czasie")
+            return "timeout"
+        self.hwnd = window.hwnd
+        self._lost_since = None
+        if self.on_rebind:
+            self.on_rebind(window)
+        self.emit("♻ okno gry uruchomione — czekam na wejście na serwer")
+        return self._join_phase(max(r.connect_timeout_s, r.restart_connect_timeout_s))
 
     def _address_ok(self, text: str) -> bool:
         """„Connecting to bfsmc.pl, 25565”: adres musi zgadzać się z profilem (puste = nie sprawdzamy)."""

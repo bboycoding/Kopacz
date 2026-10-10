@@ -2,9 +2,16 @@
 import json
 import os
 import re
+import subprocess
+import threading
+import time
 from dataclasses import dataclass
 
 import psutil
+import win32api
+import win32con
+
+from windows import find_minecraft_windows
 
 LAUNCHER_PROCESSES = ("fjordlauncher", "prismlauncher", "polymc", "multimc")
 _NATIVES_RE = re.compile(r"^-Djava\.library\.path=(.+)$")
@@ -172,3 +179,144 @@ def _instances_dir_for_exe(exe: str) -> str:
         if os.path.isdir(cand) and folder.lower() in os.path.basename(exe).lower():
             return cand
     return ""
+
+
+# ---------- restart instancji (ostateczność) ----------
+
+GAME_PROCESS_NAMES = ("javaw", "java")
+_FLAG_RE = re.compile(r"^-{1,2}[A-Za-z]")
+
+
+class RestartError(Exception):
+    """Nie udało się zamknąć albo uruchomić instancji."""
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def find_instance_processes(instances_dir: str, instance_id: str,
+                            names: tuple[str, ...] = GAME_PROCESS_NAMES) -> list[psutil.Process]:
+    """Procesy gry, które należą do tej JEDNEJ instancji (po -Djava.library.path=.../<id>/natives).
+    Nigdy nie zwraca launchera ani procesów innych instancji."""
+    if not instances_dir or not instance_id:
+        return []
+    target = _norm(os.path.join(instances_dir, instance_id))
+    found = []
+    for p in psutil.process_iter(["name", "pid"]):
+        try:
+            if _proc_name(p) not in names:
+                continue
+            d = instance_dir_from_pid(p.info["pid"])
+            if d and _norm(d) == target:
+                found.append(p)
+        except (psutil.Error, OSError):
+            continue
+    return found
+
+
+def close_instance(instances_dir: str, instance_id: str, timeout: float = 20.0,
+                   stop_event: threading.Event | None = None,
+                   names: tuple[str, ...] = GAME_PROCESS_NAMES) -> list[int]:
+    """Zamyka grę tej instancji: najpierw łagodnie (WM_CLOSE do jej okien — kod wyjścia 0, launcher nie
+    pokazuje komunikatu o awarii), po `timeout` s terminate, na końcu kill. Zwraca PID-y zamkniętych procesów."""
+    procs = find_instance_processes(instances_dir, instance_id, names)
+    pids = [p.pid for p in procs]
+    if not procs:
+        return []
+    for w in find_minecraft_windows():
+        if w.pid in pids:
+            try:
+                win32api.PostMessage(w.hwnd, win32con.WM_CLOSE, 0, 0)
+            except Exception:  # noqa: BLE001 — okno mogło zniknąć w międzyczasie
+                pass
+    stop = stop_event or threading.Event()
+    deadline = time.monotonic() + timeout
+    alive = procs
+    while alive and time.monotonic() < deadline and not stop.is_set():
+        _, alive = psutil.wait_procs(alive, timeout=0.5)
+    if stop.is_set():
+        return pids
+    for p in alive:
+        try:
+            p.terminate()
+        except psutil.Error:
+            pass
+    _, alive = psutil.wait_procs(alive, timeout=5)
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(alive, timeout=5)
+    return pids
+
+
+def build_launch_argv(exe: str, template: str, **values: str) -> list[str]:
+    """Argumenty uruchomienia z szablonu, np. "-l {instance} -s {server} -a {nick}".
+    Każdy token podstawiany osobno, więc wartości ze spacjami i nawiasami (np. „1.21.11(2)”) zostają
+    jednym argumentem. Opcja z pustą wartością (np. brak adresu serwera) jest pomijana razem z flagą."""
+    argv: list[str] = []
+    for token in template.split():
+        try:
+            rendered = token.format(**values)
+        except (KeyError, IndexError) as e:
+            raise ValueError(f"Nieznane pole w szablonie argumentów: {e}") from e
+        if "{" in token and not rendered.strip():
+            if argv and _FLAG_RE.match(argv[-1]):
+                argv.pop()
+            continue
+        argv.append(rendered)
+    return [exe, *argv]
+
+
+def launch_instance(exe: str, template: str, instance: str, server: str, nick: str) -> subprocess.Popen:
+    if not exe or not os.path.isfile(exe):
+        raise RestartError(f"Nie znaleziono launchera: {exe or '(nie ustawiony)'}")
+    argv = build_launch_argv(exe, template, instance=instance, server=server, nick=nick)
+    try:
+        return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, close_fds=True,
+                                creationflags=0x00000008 | 0x00000200)   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    except OSError as e:
+        raise RestartError(f"Nie udało się uruchomić launchera: {e}") from e
+
+
+def wait_for_window(instance_id: str, timeout: float, stop_event: threading.Event | None = None,
+                    exclude: set[int] = frozenset()):
+    """Czeka na okno gry tej instancji (poza `exclude`, np. starym hwnd). Zwraca McWindow albo None."""
+    stop = stop_event or threading.Event()
+    deadline = time.monotonic() + timeout
+    while not stop.is_set():
+        for w in find_minecraft_windows():
+            if w.hwnd not in exclude and instance_for_pid(w.pid) == instance_id:
+                return w
+        if time.monotonic() >= deadline:
+            return None
+        stop.wait(1.0)
+    return None
+
+
+@dataclass
+class GameRestarter:
+    """Zamyka i uruchamia ponownie JEDNĄ instancję launchera."""
+    exe: str
+    args_template: str
+    instances_dir: str
+    instance_id: str
+    nick: str
+    server: str
+    close_timeout_s: float = 20.0
+    window_timeout_s: float = 120.0
+
+    def available(self) -> bool:
+        return bool(self.exe and self.instances_dir and self.instance_id)
+
+    def close(self, stop_event: threading.Event | None = None) -> list[int]:
+        return close_instance(self.instances_dir, self.instance_id, self.close_timeout_s, stop_event)
+
+    def launch(self) -> None:
+        launch_instance(self.exe, self.args_template, self.instance_id, self.server, self.nick)
+
+    def wait_window(self, stop_event: threading.Event, exclude: set[int]):
+        return wait_for_window(self.instance_id, self.window_timeout_s, stop_event, exclude)

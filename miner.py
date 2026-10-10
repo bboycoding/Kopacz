@@ -4,6 +4,8 @@ import threading
 import time
 from contextlib import contextmanager
 
+import pywintypes
+
 from config import Config
 from win_input import key_to_vk, make_sender
 from windows import McWindow, is_alive
@@ -47,6 +49,8 @@ class Miner(threading.Thread):
         self.started_at: float | None = None
         self.status = "Startuje…"
         self.note: str | None = None            # komunikat z zewnątrz (np. „Odzyskiwanie”); GUI pokazuje go zamiast statusu
+        # Gdy True, zniknięcie okna gry (crash, restart instancji) nie kończy wątku: kopacz czeka na rebind().
+        self.keep_alive_without_window = False
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -81,6 +85,26 @@ class Miner(threading.Thread):
             yield ok
         finally:
             self.resume()
+
+    def rebind(self, window: McWindow) -> None:
+        """Przepina kopacza na nowe okno gry (po restarcie instancji). Wołać, gdy kopacz jest wstrzymany."""
+        self.window = window
+        self.sender = make_sender(self.cfg.backend, window.hwnd)
+
+    def _survive_window_loss(self) -> bool:
+        """Okno gry zniknęło. Czeka (bez wysyłania czegokolwiek), aż ktoś poprosi o pauzę i przepnie
+        kopacza na nowe okno albo okno wróci. Zwraca False przy stopie."""
+        self.sender.release_all()
+        self.status = "Okno MC zamknięte"
+        while not self._stop_event.is_set():
+            if self._pause_event.is_set():
+                return self._handle_pause()
+            if is_alive(self.window.hwnd):
+                self.sender.lmb_down()
+                self.status = "Kopie"
+                return True
+            self._stop_event.wait(0.2)
+        return False
 
     def _handle_pause(self) -> bool:
         """Jeśli trwa prośba o pauzę: puszcza wszystko, potwierdza i czeka na wznowienie.
@@ -123,36 +147,20 @@ class Miner(threading.Thread):
 
     def run(self) -> None:
         c = self.cfg
-        hwnd = self.window.hwnd
         self.started_at = time.time()
         try:
             right, left = key_to_vk(c.key_right), key_to_vk(c.key_left)
             self.status = "Kopie"
             self.sender.lmb_down()
             while not self._stop_event.is_set():
-                if not self._handle_pause():
-                    return
-                interrupted = False
-                for vk in (right, left):
-                    if not is_alive(hwnd):
-                        self.status = "Okno MC zamknięte"
+                try:
+                    if not self._run_cycle(c, right, left):
                         return
-                    result = _hold(self.sender, vk, self._segment_time(), self._stop_event, self._pause_event)
-                    if result == DONE:
-                        result = self._wait(c.turn_pause)
-                    if result == STOPPED:
-                        return
-                    if result == PAUSED:
-                        # Po wznowieniu zaczynamy cykl od nowa (od ruchu w prawo); niepełny cykl się nie liczy.
-                        interrupted = True
-                        break
-                if interrupted:
-                    continue
-                self.cycles += 1
-                if c.lmb_refresh_cycles and self.cycles % c.lmb_refresh_cycles == 0:
-                    self.sender.lmb_up()
-                    time.sleep(0.05)
-                    self.sender.lmb_down()
+                except pywintypes.error:
+                    # Okno zniknęło w trakcie wysyłania wiadomości. Bez rejoinu kończymy z błędem jak dotąd.
+                    if not self.keep_alive_without_window:
+                        raise
+                    self._stop_event.wait(0.1)
         except Exception as e:  # noqa: BLE001 — błąd pokazywany w GUI
             self.status = f"Błąd: {e}"
         finally:
@@ -161,6 +169,33 @@ class Miner(threading.Thread):
             self.note = None
             if self.status in ("Kopie", "Wstrzymany"):
                 self.status = "Zatrzymany"
+
+    def _run_cycle(self, c: Config, right: int, left: int) -> bool:
+        """Jeden cykl prawo–lewo. False = koniec pracy kopacza (stop albo zamknięte okno)."""
+        if not self._handle_pause():
+            return False
+        for vk in (right, left):
+            if not is_alive(self.window.hwnd):
+                if not self.keep_alive_without_window:
+                    self.status = "Okno MC zamknięte"
+                    return False
+                if not self._survive_window_loss():
+                    return False
+                return True                 # nowy cykl na (być może) nowym oknie
+            result = _hold(self.sender, vk, self._segment_time(), self._stop_event, self._pause_event)
+            if result == DONE:
+                result = self._wait(c.turn_pause)
+            if result == STOPPED:
+                return False
+            if result == PAUSED:
+                # Po wznowieniu zaczynamy cykl od nowa (od ruchu w prawo); niepełny cykl się nie liczy.
+                return True
+        self.cycles += 1
+        if c.lmb_refresh_cycles and self.cycles % c.lmb_refresh_cycles == 0:
+            self.sender.lmb_up()
+            time.sleep(0.05)
+            self.sender.lmb_down()
+        return True
 
 
 def run_action(window: McWindow, backend: str, vk: int, duration: float,

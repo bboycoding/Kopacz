@@ -6,6 +6,7 @@
   python devtools.py discord-test              — wiadomość testowa na zapisany webhook
   python devtools.py chat <id_instancji> "<tekst>" — wpisuje tekst/komendę na czacie okna instancji (PRAWDZIWA wysyłka)
   python devtools.py keys <id_instancji> KLAWISZ... — naciska klawisze w oknie (np. TAB ENTER wait:2 ENTER)
+  python devtools.py relaunch <id_instancji> [--yes] — restart JEDNEJ instancji. Bez --yes tylko pokazuje, co by zrobił
   python devtools.py pause-test <id_instancji> [kopanie_s] [pauza_s]
                                                — na PRAWDZIWYM oknie: kopanie, pauza, wznowienie, stop
 """
@@ -137,6 +138,37 @@ def cmd_keys(instance_id: str, *keys: str) -> int:
     return 0
 
 
+def cmd_relaunch(instance_id: str, *flags: str) -> int:
+    """Zamyka (łagodnie, potem siłą) TYLKO proces gry tej instancji i uruchamia ją ponownie przez launcher.
+    Bez --yes: tryb „na sucho”, nic nie jest zamykane."""
+    cfg = load_config()
+    exe, instances_dir = cfg.launcher.exe, cfg.launcher.instances_dir
+    if not (exe and instances_dir):
+        found_exe, found_dir = L.detect_launcher()
+        exe, instances_dir = exe or found_exe, instances_dir or found_dir
+    account = next((a for a in cfg.accounts if a.instance_id == instance_id), None)
+    nick = (account.nick or account.name) if account else ""
+    profile = next((s for s in cfg.servers if account and s.id == account.server_id), None)
+    server = profile.address if profile else ""
+    if not nick:
+        print("Brak konta dla tej instancji w config.json — nick będzie pusty (flaga -a pominięta).")
+    argv = L.build_launch_argv(exe, cfg.launcher.args_template, instance=instance_id, server=server, nick=nick)
+    procs = L.find_instance_processes(instances_dir, instance_id)
+    print(f"Instancja:  {instance_id}")
+    print(f"Do zamknięcia ({len(procs)}): " + (", ".join(f"PID {p.pid}" for p in procs) or "— żaden proces —"))
+    print("Polecenie uruchomienia: " + " ".join(f'"{a}"' if " " in a else a for a in argv))
+    if "--yes" not in flags:
+        print("\nTRYB NA SUCHO — nic nie zostało zamknięte ani uruchomione. Dodaj --yes, żeby wykonać.")
+        return 0
+    pids = L.close_instance(instances_dir, instance_id, cfg.rejoin.close_timeout_s)
+    print("Zamknięto PID: " + (", ".join(map(str, pids)) or "—"))
+    L.launch_instance(exe, cfg.launcher.args_template, instance_id, server, nick)
+    print("Uruchomiono launcher; czekam na okno gry…")
+    window = L.wait_for_window(instance_id, cfg.rejoin.restart_timeout_s)
+    print(f"Nowe okno: hwnd {window.hwnd}, PID {window.pid}" if window else "Okno gry nie pojawiło się w czasie.")
+    return 0 if window else 1
+
+
 def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> int:
     """Kopie `mine_s` s → pauza `pause_s` s → kopie 10 s → stop. Postać RUSZA SIĘ w grze — patrz na okno."""
     cfg = load_config()
@@ -173,7 +205,8 @@ def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> 
 
 
 COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test,
-            "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys}
+            "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys,
+            "relaunch": cmd_relaunch}
 
 
 def main(argv: list[str]) -> int:

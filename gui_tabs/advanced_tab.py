@@ -95,6 +95,14 @@ class AdvancedTab:
         self.max_attempts_l1 = field("Rozłączenie: liczba prób przez menu", str(r.max_attempts_l1))
         self.connect_timeout = field("Rozłączenie: czas na połączenie z serwerem [s]", f"{r.connect_timeout_s:g}")
         self.login_timeout = field("Rozłączenie: czas na logowanie i wejście do lobby [s]", f"{r.login_timeout_s:g}")
+        self.max_attempts_l2 = field("Restart gry: liczba prób (0 = wyłączony)", str(r.max_attempts_l2),
+                                     "Ostateczność po nieudanym powrocie przez menu albo gdy okno gry zniknęło: zamyka "
+                                     "TYLKO proces tej instancji (łagodnie, potem siłą) i uruchamia ją przez launcher "
+                                     "(wymaga ustawionego launchera i instancji w koncie).")
+        self.close_timeout = field("Restart gry: czas na łagodne zamknięcie [s]", f"{r.close_timeout_s:g}")
+        self.restart_timeout = field("Restart gry: czas na nowe okno [s]", f"{r.restart_timeout_s:g}")
+        self.restart_connect = field("Restart gry: czas na wejście na serwer po starcie [s]",
+                                     f"{r.restart_connect_timeout_s:g}")
         self.backoff = field("Odstępy między próbami [s], po przecinku", ", ".join(f"{x:g}" for x in r.backoff_s),
                              "Kolejne wartości dla kolejnych prób; ostatnia powtarza się, jeśli prób jest więcej.")
         self.gate_spacing = field("Odstęp między kontami [s]", f"{r.gate_spacing_s:g}",
@@ -128,6 +136,10 @@ class AdvancedTab:
                 max_attempts_l1=int(self.max_attempts_l1.get().strip()),
                 connect_timeout_s=num(self.connect_timeout),
                 login_timeout_s=num(self.login_timeout),
+                max_attempts_l2=int(self.max_attempts_l2.get().strip()),
+                close_timeout_s=num(self.close_timeout),
+                restart_timeout_s=num(self.restart_timeout),
+                restart_connect_timeout_s=num(self.restart_connect),
                 backoff_s=[float(x.replace(",", ".")) for x in self._split(self.backoff.get())],
                 gate_spacing_s=num(self.gate_spacing),
                 slow_retry=bool(self.slow_retry.get()),

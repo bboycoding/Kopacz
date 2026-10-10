@@ -90,6 +90,9 @@ class RejoinCfg:
     max_attempts_l2: int = 2
     connect_timeout_s: float = 20.0     # po nawigacji po menu: tyle czasu na „Connecting to”
     login_timeout_s: float = 45.0       # od połączenia do wejścia do lobby / trybu gry
+    close_timeout_s: float = 20.0       # restart instancji: tyle czekamy na łagodne zamknięcie gry
+    restart_timeout_s: float = 120.0    # restart instancji: tyle czekamy na nowe okno gry
+    restart_connect_timeout_s: float = 90.0   # po restarcie: tyle czekamy na automatyczne wejście na serwer
     slow_retry: bool = True
     slow_retry_min: float = 30.0
     gate_spacing_s: float = 10.0
@@ -199,6 +202,9 @@ class Config:
             parse_menu_keys(r.menu_keys)
         except ValueError as e:
             raise ValueError(f"Sekwencja klawiszy w menu: {e}") from e
+        if not (5 <= r.close_timeout_s <= 300 and 10 <= r.restart_timeout_s <= 900
+                and 10 <= r.restart_connect_timeout_s <= 900):
+            raise ValueError("Czasy restartu instancji: zamknięcie 5–300 s, okno 10–900 s, połączenie 10–900 s.")
         if not 1 <= r.connect_timeout_s <= 600 or not 1 <= r.login_timeout_s <= 600:
             raise ValueError("Czasy oczekiwania na połączenie i logowanie muszą być w zakresie 1–600 s.")
         if not 0 <= r.pause_before_s <= 600:

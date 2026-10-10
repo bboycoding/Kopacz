@@ -742,6 +742,8 @@ class App(ctk.CTk):
         if self._running(window.hwnd):
             return
         miner = Miner(window, replace(cfg))
+        acc = self.account_for_instance(self.window_instance.get(window.hwnd, ""))
+        miner.keep_alive_without_window = bool(acc and acc.enabled and self.cfg.rejoin.enabled)
         self.miners[window.hwnd] = miner
         miner.start()
         self._start_runner(window, miner)
@@ -767,17 +769,45 @@ class App(ctk.CTk):
                 notifier.alert(key, summary, label, text, ping)
 
         profile = next((s for s in self.cfg.servers if s.id == acc.server_id), None)
+        lc = self.cfg.launcher
+        restarter = None
+        if rcfg.enabled and lc.exe and lc.instances_dir and acc.instance_id:
+            restarter = L.GameRestarter(lc.exe, lc.args_template, lc.instances_dir, acc.instance_id,
+                                        acc.nick or acc.name, profile.address if profile else "",
+                                        rcfg.close_timeout_s, rcfg.restart_timeout_s)
+        holder: list = []          # runner powstaje po fabryce Rejoinera
+        current = {"hwnd": window.hwnd}
+
+        def rebind(new_window: McWindow) -> None:
+            """Po restarcie instancji (wątek nadzorcy): kopacz i nadzorca dostają nowe okno; GUI przepina klucze."""
+            old = current["hwnd"]
+            current["hwnd"] = new_window.hwnd
+            miner.rebind(new_window)
+            if holder:
+                holder[0].hwnd = new_window.hwnd
+            self.after(0, lambda: self._rekey_window(old, new_window))
+
         factory = None
         if rcfg.enabled:
             def factory(stop, acc=acc, profile=profile):
                 return Rejoiner(acc, profile, rcfg, miner, window.hwnd, rcfg.chat_key, stop,
                                 self.rejoin_gate, emit, alert,
-                                password=lambda: self.secrets.password_for(acc.id))
+                                password=lambda: self.secrets.password_for(acc.id),
+                                restarter=restarter, on_rebind=rebind)
 
         runner = Account(acc, miner, window.hwnd, chat_key=rcfg.chat_key, stabilize_s=rcfg.stabilize_s,
                          emit=emit, rejoiner_factory=factory)
+        holder.append(runner)
         self.runners[window.hwnd] = runner
         runner.start()
+
+    def _rekey_window(self, old_hwnd: int, new_window: McWindow) -> None:
+        """Wątek GUI: po restarcie instancji okno ma nowy hwnd — przenosimy kopacza, nadzorcę i mapowanie."""
+        for registry in (self.miners, self.runners):
+            item = registry.pop(old_hwnd, None)
+            if item is not None:
+                registry[new_window.hwnd] = item
+        self.refresh_windows()
 
     def _on_log_event(self, acc: AccountCfg, ev) -> None:
         """Zdarzenie z logu (wątek LogTail) → nadzorca właściwego konta."""
