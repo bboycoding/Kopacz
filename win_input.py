@@ -111,6 +111,13 @@ class PostMessageBackend:
         self._post(win32con.WM_LBUTTONUP, 0, self._center())
         self._lmb = False
 
+    def activate_hint(self) -> None:
+        """WM_SETFOCUS: gra (GLFW) uznaje okno za aktywne, system i prawdziwy kursor zostają nietknięte.
+        Dzięki temu po zamknięciu ekranu gra sama złapie mysz (bez tego w tle kopanie nie działa).
+        UWAGA: wolno wysyłać TYLKO przy otwartym ekranie (np. czacie), gdy mysz na pewno jest puszczona —
+        przy złapanej myszy GLFW wyśrodkowałby i zablokował prawdziwy kursor użytkownika."""
+        self._post(win32con.WM_SETFOCUS, 0, 0)
+
     def rmb_down(self) -> None:
         self._post(win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, self._center())
         self._rmb = True

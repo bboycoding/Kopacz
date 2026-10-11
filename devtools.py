@@ -6,6 +6,7 @@
   python devtools.py discord-test              — wiadomość testowa na zapisany webhook
   python devtools.py chat <id_instancji> "<tekst>" — wpisuje tekst/komendę na czacie okna instancji (PRAWDZIWA wysyłka)
   python devtools.py keys <id_instancji> KLAWISZ... — naciska klawisze w oknie (np. TAB ENTER wait:2 ENTER)
+  python devtools.py regrab <id_instancji>     — „łapie” mysz w grze w tle (czat otwórz/zamknij), po nim kopanie działa
   python devtools.py relaunch <id_instancji> [--yes] — restart JEDNEJ instancji. Bez --yes tylko pokazuje, co by zrobił
   python devtools.py eat-test <id_instancji>   — na PRAWDZIWYM oknie: kilof → jedzenie → kilof (wg ustawień konta)
   python devtools.py pause-test <id_instancji> [kopanie_s] [pauza_s]
@@ -124,6 +125,19 @@ def cmd_chat(instance_id: str, text: str) -> int:
     return 0
 
 
+def cmd_regrab(instance_id: str) -> int:
+    window = _window_for(instance_id)
+    if window is None:
+        return 1
+    try:
+        ChatSender(window.hwnd, load_config().rejoin.chat_key).regrab()
+    except ChatError as e:
+        print(f"Nie udało się: {e}")
+        return 1
+    print("Gotowe — mysz złapana; uruchom kopanie na tym koncie i sprawdź, czy kopie.")
+    return 0
+
+
 def cmd_keys(instance_id: str, *keys: str) -> int:
     window = _window_for(instance_id)
     if window is None or not keys:
@@ -231,7 +245,7 @@ def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> 
 
 
 COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test,
-            "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys,
+            "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys, "regrab": cmd_regrab,
             "relaunch": cmd_relaunch, "eat-test": cmd_eat_test}
 
 

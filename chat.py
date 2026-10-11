@@ -52,7 +52,15 @@ class ChatSender:
             raise ChatAborted()
 
     def send(self, text: str) -> None:
-        text = check_text(text)
+        self._run(check_text(text))
+
+    def regrab(self) -> None:
+        """Łapie mysz w grze bez wysyłania niczego na czat: otwiera czat, oznacza okno jako aktywne
+        i zamyka pusty czat Enterem — gra po zamknięciu ekranu przechwytuje mysz i kopanie znów działa.
+        Potrzebne po powrocie na serwer (ekrany rozłączenia/ładowania puszczają mysz)."""
+        self._run(None)
+
+    def _run(self, text: str | None) -> None:
         if not is_alive(self.hwnd):
             raise ChatError("Okno gry jest zamknięte.")
         if self.require_connected and not is_connected(self.hwnd):
@@ -63,9 +71,14 @@ class ChatSender:
             self._sleep(self.open_wait)
             tap(b, key_to_vk("BACKSPACE"))
             self._sleep(0.05)
-            b.type_text(text)
+            # Czat jest otwarty, więc mysz na pewno jest puszczona — tylko teraz wolno „aktywować” okno.
+            # Po Enterze gra zamknie czat i złapie mysz, inaczej w tle kopacz przestałby kopać.
+            b.activate_hint()
+            self._sleep(0.05)
+            if text:
+                b.type_text(text)
             self._sleep(self.after_type_wait)
-            tap(b, key_to_vk("ENTER"))
+            tap(b, key_to_vk("ENTER"))      # pusty czat: Enter tylko go zamyka
             self._sleep(self.after_send_wait)
         except ChatAborted:
             # Przerwane w środku: zamykamy czat, żeby nie został otwarty z niedopisanym tekstem.

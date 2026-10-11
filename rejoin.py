@@ -548,17 +548,21 @@ class Rejoiner:
         if self.stop.wait(SETTLE_S):
             return
         commands = [c for c in [self.acc.home_command, *self.acc.after_join_commands] if c.strip()]
-        if commands:
-            try:
-                sender = self.sender_factory(self.hwnd, self.chat_key, self.stop)
-                for i, command in enumerate(commands):
-                    if i and self.stop.wait(COMMAND_GAP):
-                        return
-                    sender.send(command)
-            except ChatAborted:
-                return
-            except ChatError as e:
-                self.emit(f"⚠ nie wysłano komendy po wejściu: {e}")
+        try:
+            sender = self.sender_factory(self.hwnd, self.chat_key, self.stop)
+            for i, command in enumerate(commands):
+                if i and self.stop.wait(COMMAND_GAP):
+                    return
+                sender.send(command)
+            # Ekrany rozłączenia i ładowania świata puściły mysz, a w tle gra sama jej nie złapie —
+            # bez tego kopacz chodziłby, ale nie kopał. (Komendy powyżej łapią ją przy okazji.)
+            regrab = getattr(sender, "regrab", None)
+            if regrab and not commands:
+                regrab()
+        except ChatAborted:
+            return
+        except ChatError as e:
+            self.emit(f"⚠ nie udało się przygotować gry po wejściu (czat/mysz): {e}")
         self._lost_since = None
         self._error_alerted = False
         self.state = OK
