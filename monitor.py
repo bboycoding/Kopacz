@@ -51,11 +51,18 @@ class _Filter:
         """Czy zwykłą linię logu (nie zdarzenie) wysłać na Discorda."""
         if ev.kind not in (W.CHAT, W.CHAT_PLAYER):
             return False                # linie techniczne (render, authlib…) to szum
+        # Linie o własnym koncie (np. „Gracz <nick> zdobył klucz”) idą zawsze — także gdy pasują do
+        # wykluczeń, które mają wycinać ten sam komunikat o INNYCH graczach.
+        if nick and _mentions(ev.text, nick):
+            return True
         if any(p.search(ev.text) for p in self.exclude):
             return False
-        if nick and nick.lower() in ev.text.lower():
-            return True
         return any(p.search(ev.text) for p in self.include)
+
+
+def _mentions(text: str, nick: str) -> bool:
+    """Nick jako całe słowo: „julimat” nie pasuje do „julimat_afk” ani „xjulimat”."""
+    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(nick) + r"(?![A-Za-z0-9_])", text, re.IGNORECASE) is not None
 
 
 class Monitor:

@@ -203,7 +203,7 @@ Do próby prawdziwego rozłączenia tylko jednej instancji użyj programu **TCPV
 1. W Discordzie: kanał → **Edytuj kanał → Integracje → Webhooki → Nowy webhook → Kopiuj adres**.
 2. Zakładka **Discord**: zaznacz „Wysyłaj logi i alerty”, wklej adres webhooka, wpisz swoje ID użytkownika (do pingów), **Zapisz**, a potem **Wyślij test**.
 
-Na kanał trafiają: zdarzenia bota (rozłączenie, przeniesienie do lobby, wejście do gry, ban, postęp powrotu, wysłane komendy), linie z nickiem konta oraz linie pasujące do Twoich wzorców „Wysyłaj także”. Wzorce „Nigdy nie wysyłaj” odfiltrowują szum (przykładowy profil bfsmc.pl ustawia je za Ciebie). Linie z wielu kont łączą się w jedną wiadomość co kilka sekund, a alert o tym samym problemie na kilku kontach naraz to jedna wiadomość, np. „Rozłączone: 3/4 kont”. **Ping dostajesz tylko przy stanie BŁĄD i banie.** Awaria Discorda nigdy nie zatrzymuje kopania.
+Na kanał trafiają: zdarzenia bota (rozłączenie, przeniesienie do lobby, wejście do gry, ban, postęp powrotu, wysłane komendy), linie z nickiem konta (np. „Gracz <Twój nick> zdobył klucz…”) oraz linie pasujące do Twoich wzorców „Wysyłaj także”. Wzorce „Nigdy nie wysyłaj” odfiltrowują szum (przykładowy profil bfsmc.pl ustawia je za Ciebie), ale nie wycinają linii z nickiem Twojego konta — klucze innych graczy znikają, Twoje przychodzą. Linie z wielu kont łączą się w jedną wiadomość co kilka sekund, a alert o tym samym problemie na kilku kontach naraz to jedna wiadomość, np. „Rozłączone: 3/4 kont”. **Ping dostajesz tylko przy stanie BŁĄD i banie.** Awaria Discorda nigdy nie zatrzymuje kopania.
 
 ### 8.6 Bezpieczeństwo i prywatność
 

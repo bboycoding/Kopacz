@@ -58,7 +58,8 @@ class DiscordTab:
         self.ping_id = entry(app.secrets.discord_ping_id)
 
         caption("Wysyłaj także linie pasujące do wzorców (po jednym wyrażeniu w linii)",
-                "Zawsze wysyłane: zdarzenia bota (rozłączenie, lobby, wejście do gry, ban) i linie z nickiem konta.")
+                "Zawsze wysyłane: zdarzenia bota (rozłączenie, lobby, wejście do gry, ban) i linie z nickiem konta "
+                "(np. Twoje klucze) — także gdy pasują do wzorców „Nigdy nie wysyłaj”.")
         self.include = textbox(d.include)
         caption("Nigdy nie wysyłaj linii pasujących do wzorców (szum)")
         self.exclude = textbox(d.exclude)
