@@ -3,6 +3,7 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import launcher as L
 import log_watcher as W
@@ -24,6 +25,60 @@ _EVENT_LABELS = {
     W.LOBBY: "Lobby",
     W.IN_GAME: "Wejście do gry",
 }
+
+
+SUMMARY_TICK = 5.0          # co ile sekund wątek podsumowań sprawdza, czy już pora
+_now = datetime.now         # podmieniane w testach
+
+
+def next_boundary(now: datetime, minutes: float) -> datetime:
+    """Najbliższa „okrągła” pora: dla 60 min pełna godzina, dla 30 — :00 i :30 itd."""
+    step = max(1, int(round(minutes)))
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = (now - midnight).total_seconds() / 60
+    return midnight + timedelta(minutes=(int(elapsed // step) + 1) * step)
+
+
+class RewardCounter:
+    """Klucze (nagrody) zdobyte przez konta: w bieżącym okresie i od uruchomienia programu."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._window: dict[str, int] = {}
+        self._total: dict[str, int] = {}
+        self.labels: list[str] = []     # konta pokazywane w podsumowaniu (kolejność jak w konfiguracji)
+
+    def set_labels(self, labels: list[str]) -> None:
+        with self._lock:
+            self.labels = list(dict.fromkeys(labels))
+
+    def hit(self, label: str) -> None:
+        with self._lock:
+            self._window[label] = self._window.get(label, 0) + 1
+            self._total[label] = self._total.get(label, 0) + 1
+
+    def take_summary(self, start: datetime, end: datetime) -> str | None:
+        """Tekst podsumowania okresu; zeruje licznik okresu. None, gdy nie ma kont."""
+        with self._lock:
+            if not self.labels:
+                self._window.clear()
+                return None
+            rows = [f"{label}: {self._window.get(label, 0)}" for label in self.labels]
+            window = sum(self._window.get(label, 0) for label in self.labels)
+            total = sum(self._total.get(label, 0) for label in self.labels)
+            self._window.clear()
+        return (f"🔑 Klucze {start:%H:%M}–{end:%H:%M}\n" + "\n".join(rows)
+                + f"\nRazem: {window} (od uruchomienia programu: {total})")
+
+
+def reward_regex(profile: ServerProfile | None, nick: str) -> re.Pattern | None:
+    """Wzorzec nagrody TEGO konta: {nick} zamieniony na nick (dosłownie). None, gdy brak wzorca lub nicku."""
+    if profile is None or not profile.pat_reward or not nick:
+        return None
+    try:
+        return re.compile(profile.pat_reward.replace("{nick}", re.escape(nick)), re.IGNORECASE)
+    except re.error:
+        return None
 
 
 def account_label(acc: AccountCfg) -> str:
@@ -74,6 +129,11 @@ class Monitor:
         self.tails: list[W.LogTail] = []
         self.listeners: list[Callable[[AccountCfg, W.LogEvent], None]] = []   # dla rejoinu (kolejne kroki)
         self._lock = threading.Lock()
+        # Licznik kluczy i jego wątek żyją przez cały czas programu (nie zerują się przy zapisie ustawień).
+        self.rewards = RewardCounter()
+        self._summary_min = 0.0
+        self._summary_stop = threading.Event()
+        self._summary_thread: threading.Thread | None = None
 
     def apply(self, cfg: Config, secrets: Secrets, instances_dir: str) -> None:
         with self._lock:
@@ -88,6 +148,12 @@ class Monitor:
                     mask=lambda t: mask(t, secrets), total_accounts=len(accounts))
                 notifier.start()
             self.notifier = notifier
+            self.rewards.set_labels([account_label(a) for a in accounts])
+            self._summary_min = cfg.discord.key_summary_min
+            if self._summary_thread is None:
+                self._summary_thread = threading.Thread(target=self._summary_loop, daemon=True,
+                                                        name="KeySummary")
+                self._summary_thread.start()
             flt = _Filter.from_cfg(cfg.discord)
             profiles = {s.id: s for s in cfg.servers}
             for acc in accounts:
@@ -102,11 +168,15 @@ class Monitor:
     def _handler(self, acc: AccountCfg, profile: ServerProfile | None, flt: _Filter,
                  notifier: DiscordNotifier | None) -> Callable[[str], None]:
         label = account_label(acc)
+        reward = reward_regex(profile, acc.nick)
 
         def handle(raw: str) -> None:
             ev = W.classify(raw, profile)
             if ev is None:
                 return
+            # Liczymy tylko komunikaty serwera (CHAT), nie czat graczy — nikt nie „nabije” licznika.
+            if reward is not None and ev.kind == W.CHAT and reward.search(ev.text):
+                self.rewards.hit(label)
             for listener in list(self.listeners):
                 listener(acc, ev)
             if notifier is None:
@@ -121,7 +191,34 @@ class Monitor:
 
         return handle
 
+    def _summary_loop(self) -> None:
+        """Co `key_summary_min` minut (o okrągłych porach) wysyła podsumowanie kluczy na Discorda."""
+        window_start = _now()
+        next_due: datetime | None = None
+        minutes_seen = None
+        while not self._summary_stop.wait(SUMMARY_TICK):
+            minutes = self._summary_min
+            if minutes <= 0:
+                next_due = None
+                continue
+            now = _now()
+            if next_due is None or minutes != minutes_seen:
+                next_due, minutes_seen = next_boundary(now, minutes), minutes
+                continue
+            if now < next_due:
+                continue
+            text = self.rewards.take_summary(window_start, next_due)
+            notifier = self.notifier
+            if text and notifier is not None:
+                try:
+                    notifier.message(text)
+                except Exception:  # noqa: BLE001 — Discord nie może zatrzymać licznika
+                    pass
+            window_start = next_due
+            next_due = next_boundary(now, minutes)
+
     def stop(self) -> None:
+        self._summary_stop.set()
         with self._lock:
             self._stop_locked()
 

@@ -20,6 +20,9 @@ PATTERN_FIELDS = (
     ("pat_moved_to_lobby", "Przeniesienie do lobby", "Np. po restarcie trybu gry; klient zostaje połączony."),
     ("pat_ban", "Ban", "Po tej linii bot nie próbuje wracać na serwer, tylko wysyła alert."),
     ("pat_player_chat", "Czat graczy (ignorowany)", "Linie pasujące tutaj nigdy nie wywołują zdarzeń."),
+    ("pat_reward", "Zdobycie nagrody (licznik kluczy)",
+     "Komunikat, gdy TO konto zdobędzie nagrodę, np. Gracz {nick} zdobył klucz — {nick} zostanie zastąpiony "
+     "nickiem konta. Na tej podstawie Discord dostaje podsumowanie kluczy."),
 )
 KIND_NAMES = {
     W.CONNECTING: "Łączenie", W.DISCONNECTED: "Rozłączenie", W.STOPPING: "Zamknięcie gry",

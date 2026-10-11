@@ -1,7 +1,7 @@
 """Gotowe profile serwerów — punkt wyjścia do własnych ustawień w GUI."""
 from dataclasses import replace
 
-from config import ServerProfile
+from config import BFSMC_IN_GAME_PATTERN, BFSMC_REWARD_PATTERN, ServerProfile
 
 BFSMC = ServerProfile(
     id="bfsmc",
@@ -12,10 +12,11 @@ BFSMC = ServerProfile(
     pat_login_prompt=r"Zaloguj się używając",
     pat_logged_in=r"Pomyślnie zalogowano",
     pat_lobby=r"WYBIERZ TRYB GRY",
-    pat_in_game=r"WITAMY NA SERWERZE SKYBLOCK",
+    pat_in_game=BFSMC_IN_GAME_PATTERN,
     pat_moved_to_lobby=r"Rozłączono z \S+:",
     pat_ban=r"(?i)zbanowan|you are banned",
     pat_player_chat=r" » ",
+    pat_reward=BFSMC_REWARD_PATTERN,
 )
 
 VANILLA = ServerProfile(

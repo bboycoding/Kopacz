@@ -65,6 +65,10 @@ class DiscordNotifier(threading.Thread):
     def line(self, label: str, text: str) -> None:
         self._q.put(("line", label, text))
 
+    def message(self, text: str) -> None:
+        """Osobna wiadomość (np. podsumowanie), wysyłana bez łączenia z liniami logu."""
+        self._q.put(("msg", text))
+
     def alert(self, key: str, summary: str, label: str, text: str, ping: bool = False) -> None:
         """Alert grupowany po `key`: kilka kont z tym samym problemem w oknie czasowym = jedna wiadomość."""
         self._q.put(("alert", key, summary, label, text, ping))
@@ -116,6 +120,8 @@ class DiscordNotifier(threading.Thread):
                         batch_started = now
                     lines.append(text)
                     size += len(text) + 1
+                elif item[0] == "msg":
+                    self._post(self.mask(item[1])[:2000], None)
                 else:
                     _, key, summary, label, text, ping = item
                     pa = alerts.setdefault(key, _PendingAlert(summary, ping, now))

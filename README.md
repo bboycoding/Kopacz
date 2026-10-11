@@ -63,6 +63,8 @@ Przejdź teraz do punktu **[5. Przygotowanie Minecrafta](#5-przygotowanie-minecr
 
 > Jeśli znasz Gita, możesz zamiast tego wpisać `git clone https://github.com/bboycoding/Kopacz.git`. Później aktualizujesz program komendą `git pull`.
 
+> ⚠️ **Aktualizacja z wersji 1.x przez Gita:** w wersji 2.0 plik `config.json` przestał być częścią repozytorium, więc `git pull` (albo merge) **usunie go z dysku**. Przed aktualizacją skopiuj `config.json` w bezpieczne miejsce i po aktualizacji przenieś go z powrotem. `secrets.json` nie jest dotknięty.
+
 ### 3. Instalacja potrzebnych bibliotek (jednorazowo)
 
 1. Otwórz folder programu w Eksploratorze plików.
@@ -204,6 +206,8 @@ Do próby prawdziwego rozłączenia tylko jednej instancji użyj programu **TCPV
 2. Zakładka **Discord**: zaznacz „Wysyłaj logi i alerty”, wklej adres webhooka, wpisz swoje ID użytkownika (do pingów), **Zapisz**, a potem **Wyślij test**.
 
 Na kanał trafiają: zdarzenia bota (rozłączenie, przeniesienie do lobby, wejście do gry, ban, postęp powrotu, wysłane komendy), linie z nickiem konta (np. „Gracz <Twój nick> zdobył klucz…”) oraz linie pasujące do Twoich wzorców „Wysyłaj także”. Wzorce „Nigdy nie wysyłaj” odfiltrowują szum (przykładowy profil bfsmc.pl ustawia je za Ciebie), ale nie wycinają linii z nickiem Twojego konta — klucze innych graczy znikają, Twoje przychodzą. Linie z wielu kont łączą się w jedną wiadomość co kilka sekund, a alert o tym samym problemie na kilku kontach naraz to jedna wiadomość, np. „Rozłączone: 3/4 kont”. **Ping dostajesz tylko przy stanie BŁĄD i banie.** Awaria Discorda nigdy nie zatrzymuje kopania.
+
+**Podsumowanie kluczy:** co godzinę (o pełnej godzinie; zmienisz to w polu „Podsumowanie kluczy co [min]”, 0 = wyłączone) przychodzi jedna wiadomość z liczbą kluczy każdego konta w tej godzinie i sumą od uruchomienia programu. Klucze są liczone według wzorca „Zdobycie nagrody (licznik kluczy)” w profilu serwera — w przykładzie bfsmc.pl to `Gracz {nick} zdobył klucz`, gdzie `{nick}` zastępowany jest nickiem konta. Liczone są tylko komunikaty serwera, nie czat graczy. Pojedyncze klucze nadal przychodzą na bieżąco.
 
 ### 8.6 Bezpieczeństwo i prywatność
 

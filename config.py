@@ -43,6 +43,8 @@ class ServerProfile:
     pat_moved_to_lobby: str = ""
     pat_ban: str = ""
     pat_player_chat: str = r" » "   # linie czatu graczy — ignorowane przy wykrywaniu zdarzeń
+    # Zdobycie nagrody przez TO konto (licznik kluczy na Discordzie); {nick} = nick konta.
+    pat_reward: str = ""
 
 
 @dataclass
@@ -79,6 +81,7 @@ class DiscordCfg:
     max_chars: int = 1800
     group_window_s: float = 20.0
     status_every_min: float = 30.0
+    key_summary_min: float = 60.0   # podsumowanie zdobytych kluczy co tyle minut (o pełnych godzinach); 0 = wyłączone
     include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
 
@@ -204,6 +207,8 @@ class Config:
             _check_regex(p, "filtr Discorda")
         if not 1 <= d.batch_seconds <= 60:
             raise ValueError("Paczkowanie Discorda musi być w zakresie 1–60 s.")
+        if not (d.key_summary_min == 0 or 5 <= d.key_summary_min <= 1440):
+            raise ValueError("Podsumowanie kluczy: 0 (wyłączone) albo 5–1440 min.")
         if not 200 <= d.max_chars <= 1900:
             raise ValueError("Rozmiar paczki Discorda musi być w zakresie 200–1900 znaków.")
         if r.max_attempts_l0 < 0 or r.max_attempts_l1 < 0 or r.max_attempts_l2 < 0:
@@ -262,6 +267,11 @@ def _build(cls, data: dict):
     return cls(**kwargs)
 
 
+# Wzorzec licznika kluczy dla bfsmc.pl (używa go preset; tu, bo potrzebny też przy migracji starych profili).
+BFSMC_REWARD_PATTERN = r"Gracz {nick} zdobył klucz"
+BFSMC_IN_GAME_PATTERN = r"WITAMY NA SERWERZE SKYBLOCK"
+
+
 def config_from_dict(data: dict) -> Config:
     top_known = {f.name for f in fields(Config)} - {"extra", "load_error"}
     flat = {k: v for k, v in data.items() if k in top_known
@@ -270,7 +280,13 @@ def config_from_dict(data: dict) -> Config:
     cfg.launcher = _build(LauncherCfg, data.get("launcher", {}))
     cfg.discord = _build(DiscordCfg, data.get("discord", {}))
     cfg.rejoin = _build(RejoinCfg, data.get("rejoin", {}))
-    cfg.servers = [_build(ServerProfile, s) for s in data.get("servers", [])]
+    cfg.servers = []
+    for s in data.get("servers", []):
+        profile = _build(ServerProfile, s)
+        # Profile utworzone z presetu bfsmc.pl przed dodaniem licznika kluczy dostają jego wzorzec.
+        if "pat_reward" not in s and profile.pat_in_game == BFSMC_IN_GAME_PATTERN:
+            profile.pat_reward = BFSMC_REWARD_PATTERN
+        cfg.servers.append(profile)
     cfg.accounts = []
     for a in data.get("accounts", []):
         acc = _build(AccountCfg, {k: v for k, v in a.items() if k != "schedule"})

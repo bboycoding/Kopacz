@@ -70,6 +70,10 @@ class DiscordTab:
         self.group = entry(str(d.group_window_s))
         caption("Status kont co [min]", "0 = bez okresowego statusu.")
         self.status_every = entry(str(d.status_every_min))
+        caption("Podsumowanie kluczy co [min]",
+                "Ile kluczy zdobyło każde konto, o pełnych godzinach (dla 60). 0 = wyłączone. Klucze liczone wg wzorca "
+                "„Zdobycie nagrody” w profilu serwera; pojedyncze klucze nadal przychodzą na bieżąco.")
+        self.key_summary = entry(f"{d.key_summary_min:g}")
 
         self.stats = ctk.CTkLabel(form, text="", font=f["body_sm"], text_color=T.TEXT_MUTED, anchor="w")
         self.stats.pack(fill="x", padx=8, pady=(14, 0))
@@ -91,6 +95,7 @@ class DiscordTab:
                 max_chars=self.app.cfg.discord.max_chars,
                 group_window_s=float(self.group.get().replace(",", ".")),
                 status_every_min=float(self.status_every.get().replace(",", ".")),
+                key_summary_min=float(self.key_summary.get().replace(",", ".")),
                 include=self._lines(self.include),
                 exclude=self._lines(self.exclude))
         except ValueError:
