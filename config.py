@@ -82,6 +82,10 @@ class RejoinCfg:
     enabled: bool = False
     chat_key: str = "T"
     menu_keys: list[str] = field(default_factory=lambda: ["TAB", "ENTER", "wait:2", "ENTER"])
+    # Inne klawisze dla wybranych powodów rozłączenia: pierwsza pasująca reguła wygrywa. Ekran po błędzie
+    # połączenia („Internal Exception…”) ma dodatkowy przycisk „Open folder” przed „Back to Server List”.
+    menu_key_rules: list[dict] = field(default_factory=lambda: [
+        {"pattern": "Internal Exception", "keys": ["TAB", "TAB", "ENTER", "wait:2", "ENTER"]}])
     pause_before_s: float = 5.0
     join_timeout_s: float = 20.0
     backoff_s: list[float] = field(default_factory=lambda: [10, 20, 40, 80, 160, 300])
@@ -202,6 +206,14 @@ class Config:
             parse_menu_keys(r.menu_keys)
         except ValueError as e:
             raise ValueError(f"Sekwencja klawiszy w menu: {e}") from e
+        for rule in r.menu_key_rules:
+            if not isinstance(rule, dict) or not str(rule.get("pattern", "")).strip() or not rule.get("keys"):
+                raise ValueError("Reguła klawiszy menu musi mieć wzorzec powodu i klawisze.")
+            _check_regex(rule["pattern"], "reguła klawiszy menu")
+            try:
+                parse_menu_keys(rule["keys"])
+            except ValueError as e:
+                raise ValueError(f"Reguła „{rule['pattern']}”: {e}") from e
         if not (5 <= r.close_timeout_s <= 300 and 10 <= r.restart_timeout_s <= 900
                 and 10 <= r.restart_connect_timeout_s <= 900):
             raise ValueError("Czasy restartu instancji: zamknięcie 5–300 s, okno 10–900 s, połączenie 10–900 s.")

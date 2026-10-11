@@ -14,6 +14,7 @@ i opcjonalnie wolne ponawianie co N minut. Wszystkie czekania są przerywane sto
 """
 import queue
 import random
+import re
 import threading
 import time
 from collections import deque
@@ -114,11 +115,14 @@ class Rejoiner:
         self._lost_since: float | None = None
         self._error_alerted = False
         self._last_text = ""        # tekst ostatniego zdarzenia zwróconego z _wait_kinds
+        self._last_reason = ""      # powód ostatniego rozłączenia — wybiera sekwencję klawiszy menu
 
     # ---------- wejście zdarzeń (z wątku LogTail) ----------
 
     def feed(self, ev: W.LogEvent) -> None:
         self._log.append(ev.raw)
+        if ev.kind == W.DISCONNECTED:
+            self._last_reason = ev.text
         if ev.kind in _FED:
             self._events.put((ev.kind, ev.text))
 
@@ -330,10 +334,13 @@ class Rejoiner:
             if self.connected(self.hwnd):
                 self.emit("ℹ okno wygląda na połączone — przechodzę do powrotu z lobby")
                 return W.LOBBY
+        keys, rule = self._menu_keys()
+        self.emit(f"⌨ klawisze menu: {', '.join(keys)}"
+                  + (f" (reguła „{rule}”, powód: {self._last_reason})" if rule else ""))
         try:
             navigator = self.menu_factory(self.hwnd, self.stop)
             with self.gate.turn(self.stop):
-                navigator.run(r.menu_keys)
+                navigator.run(keys)
         except ChatAborted:
             return "stop"
         except ChatError as e:
@@ -341,6 +348,16 @@ class Rejoiner:
             return "timeout"
 
         return self._join_phase(r.connect_timeout_s)
+
+    def _menu_keys(self) -> tuple[list[str], str | None]:
+        """Sekwencja dla powodu OSTATNIEGO rozłączenia (kolejna próba mogła skończyć się innym ekranem)."""
+        for rule in self.rcfg.menu_key_rules:
+            try:
+                if re.search(rule["pattern"], self._last_reason or ""):
+                    return list(rule["keys"]), rule["pattern"]
+            except (re.error, KeyError, TypeError):
+                continue
+        return list(self.rcfg.menu_keys), None
 
     def _join_phase(self, connect_timeout: float) -> str:
         """Po klawiszach menu albo po starcie gry: czekanie na łączenie, logowanie i wejście do lobby."""

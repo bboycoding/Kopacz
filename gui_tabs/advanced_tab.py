@@ -2,6 +2,7 @@
 import customtkinter as ctk
 
 import theme as T
+from chat import parse_rules_text, rules_to_text
 from config import LauncherCfg
 
 
@@ -92,6 +93,21 @@ class AdvancedTab:
                                "Klawisze: TAB, ENTER, ESC, DOWN, UP… oraz wait:<sekundy>. Domyślnie: TAB (fokus na "
                                "„Back to Server List”), ENTER, 2 s przerwy, ENTER (dołącz do zaznaczonego serwera). "
                                "Sprawdź na jednym koncie: python devtools.py keys <instancja> TAB ENTER …")
+        ctk.CTkLabel(card, text="Rozłączenie: inne klawisze dla wybranych powodów (wzorzec => klawisze, jedna reguła w linii)",
+                     font=f["body_sm"], text_color=T.TEXT_MUTED, anchor="w").grid(
+            row=row[0], column=0, sticky="w", padx=T.PAD, pady=(8, 2))
+        self.menu_rules = ctk.CTkTextbox(card, height=64, corner_radius=T.RADIUS_CTRL, border_width=1,
+                                         border_color=T.BORDER, fg_color=T.INPUT_BG, text_color=T.TEXT,
+                                         font=f["label"])
+        self.menu_rules.insert("1.0", rules_to_text(r.menu_key_rules))
+        self.menu_rules.grid(row=row[0] + 1, column=0, sticky="ew", padx=T.PAD)
+        ctk.CTkLabel(card, text="Powód rozłączenia z logu (np. „Internal Exception: … Connection reset”) jest "
+                                "porównywany z wzorcami po kolei; pierwsza pasująca reguła wygrywa, inaczej używana jest "
+                                "sekwencja powyżej. Ekran po błędzie połączenia ma przycisk „Open folder” przed „Back to "
+                                "Server List”, stąd dwa TAB-y.",
+                     font=f["label_sm"], text_color=T.TEXT_MUTED, wraplength=820, justify="left",
+                     anchor="w").grid(row=row[0] + 2, column=0, sticky="w", padx=T.PAD)
+        row[0] += 3
         self.max_attempts_l1 = field("Rozłączenie: liczba prób przez menu", str(r.max_attempts_l1))
         self.connect_timeout = field("Rozłączenie: czas na połączenie z serwerem [s]", f"{r.connect_timeout_s:g}")
         self.login_timeout = field("Rozłączenie: czas na logowanie i wejście do lobby [s]", f"{r.login_timeout_s:g}")
@@ -127,12 +143,18 @@ class AdvancedTab:
         from dataclasses import replace
         num = lambda entry: float(entry.get().strip().replace(",", "."))  # noqa: E731
         try:
+            rules = parse_rules_text(self.menu_rules.get("1.0", "end"))
+        except ValueError as e:
+            self.app.set_info(f"Reguły klawiszy menu: {e}", error=True)
+            return
+        try:
             fields = dict(
                 enabled=bool(self.rejoin_enabled.get()),
                 pause_before_s=num(self.pause_before),
                 join_timeout_s=num(self.join_timeout),
                 max_attempts_l0=int(self.max_attempts.get().strip()),
                 menu_keys=self._split(self.menu_keys.get()),
+                menu_key_rules=rules,
                 max_attempts_l1=int(self.max_attempts_l1.get().strip()),
                 connect_timeout_s=num(self.connect_timeout),
                 login_timeout_s=num(self.login_timeout),

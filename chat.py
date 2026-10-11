@@ -1,4 +1,5 @@
 """Wpisywanie wiadomości i komend na czacie gry przez PostMessage (okno może być w tle)."""
+import re
 import threading
 
 from windows import is_alive, is_connected
@@ -122,3 +123,32 @@ class MenuNavigator:
             raise
         except Exception as e:  # noqa: BLE001 — pywintypes.error przy zniknięciu okna
             raise ChatError(f"Błąd wysyłania klawiszy: {e}") from e
+
+
+def rules_to_text(rules: list[dict]) -> str:
+    """Reguły klawiszy menu jako tekst do edycji: jedna w linii, „wzorzec => klawisze”."""
+    return "\n".join(f"{r['pattern']} => {', '.join(r['keys'])}" for r in rules)
+
+
+def parse_rules_text(text: str) -> list[dict]:
+    """Odwrotność rules_to_text. ValueError z numerem linii przy błędzie."""
+    rules = []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        if "=>" not in line:
+            raise ValueError(f"Linia {n}: brak „=>” (format: wzorzec => klawisze).")
+        pattern, keys_text = (part.strip() for part in line.rsplit("=>", 1))
+        keys = [k.strip() for k in keys_text.replace(";", ",").split(",") if k.strip()]
+        if not pattern or not keys:
+            raise ValueError(f"Linia {n}: podaj wzorzec i klawisze.")
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ValueError(f"Linia {n}: niepoprawny wzorzec ({e}).") from None
+        try:
+            parse_menu_keys(keys)
+        except ValueError as e:
+            raise ValueError(f"Linia {n}: {e}") from None
+        rules.append({"pattern": pattern, "keys": keys})
+    return rules
