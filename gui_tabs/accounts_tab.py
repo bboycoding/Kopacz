@@ -177,6 +177,31 @@ class AccountEditor(ctk.CTkToplevel):
         app.secondary_button(form, "+  Dodaj komendę", lambda: self._add_row(ChatCommand()), height=30,
                              width=160).pack(anchor="w", padx=12, pady=(6, 0))
 
+        label("Jedzenie",
+              "Co podaną liczbę cykli bot zatrzymuje się przy ścianie, przełącza na slot z jedzeniem, trzyma prawy "
+              "przycisk myszy i wraca na slot z kilofem. W slocie jedzenia nie trzymaj bloków (PPM by je postawił). "
+              "Przy pełnym pasku głodu gra nie pozwoli jeść, więc nic się nie stanie.")
+        self.eat_enabled = ctk.CTkCheckBox(form, text="Jedz co określoną liczbę cykli", font=f["body"],
+                                           text_color=T.TEXT, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                                           checkmark_color=T.ACCENT_TEXT)
+        self.eat_enabled.pack(anchor="w", padx=12, pady=(2, 4))
+        if acc.eat_enabled:
+            self.eat_enabled.select()
+        eat_row = ctk.CTkFrame(form, fg_color="transparent")
+        eat_row.pack(fill="x", padx=12)
+
+        def small(caption: str, value: str) -> ctk.CTkEntry:
+            ctk.CTkLabel(eat_row, text=caption, font=f["body_sm"], text_color=T.TEXT_MUTED).pack(side="left")
+            entry = app._entry(eat_row, width=56, justify="center")
+            entry.insert(0, value)
+            entry.pack(side="left", padx=(6, 14))
+            return entry
+
+        self.food_slot = small("slot jedzenia", str(acc.food_slot))
+        self.pickaxe_slot = small("slot kilofa", str(acc.pickaxe_slot))
+        self.eat_every = small("co [cykli]", str(acc.eat_every_cycles))
+        self.eat_seconds = small("czas [s]", f"{acc.eat_seconds:g}")
+
         self.enabled = ctk.CTkCheckBox(form, text="Konto włączone", font=f["body"], text_color=T.TEXT,
                                        fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
                                        checkmark_color=T.ACCENT_TEXT)
@@ -268,8 +293,14 @@ class AccountEditor(ctk.CTkToplevel):
             return
         try:
             schedule = self._read_schedule()
+            eat = dict(eat_enabled=bool(self.eat_enabled.get()),
+                       food_slot=int(self.food_slot.get().strip()),
+                       pickaxe_slot=int(self.pickaxe_slot.get().strip()),
+                       eat_every_cycles=int(self.eat_every.get().strip()),
+                       eat_seconds=float(self.eat_seconds.get().strip().replace(",", ".")))
         except ValueError as e:
-            self.error.configure(text=str(e))
+            text = str(e)
+            self.error.configure(text=text if "harmonogramie" in text else "Niepoprawna liczba w ustawieniach jedzenia.")
             return
         server_id = self._servers.get(self.server.get(), self.original.server_id if self.original else "default")
         acc = AccountCfg(
@@ -283,6 +314,7 @@ class AccountEditor(ctk.CTkToplevel):
             after_join_commands=[ln.strip() for ln in self.after_join.get("1.0", "end").splitlines() if ln.strip()],
             schedule=schedule,
             enabled=bool(self.enabled.get()),
+            **eat,
         )
         error = self.app.save_account(acc, self.password.get())
         if error:

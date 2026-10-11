@@ -7,6 +7,7 @@
   python devtools.py chat <id_instancji> "<tekst>" — wpisuje tekst/komendę na czacie okna instancji (PRAWDZIWA wysyłka)
   python devtools.py keys <id_instancji> KLAWISZ... — naciska klawisze w oknie (np. TAB ENTER wait:2 ENTER)
   python devtools.py relaunch <id_instancji> [--yes] — restart JEDNEJ instancji. Bez --yes tylko pokazuje, co by zrobił
+  python devtools.py eat-test <id_instancji>   — na PRAWDZIWYM oknie: kilof → jedzenie → kilof (wg ustawień konta)
   python devtools.py pause-test <id_instancji> [kopanie_s] [pauza_s]
                                                — na PRAWDZIWYM oknie: kopanie, pauza, wznowienie, stop
 """
@@ -18,7 +19,7 @@ import log_watcher as W
 import presets
 from config import load_config
 from chat import ChatError, ChatSender
-from miner import Miner
+from miner import EatPlan, Miner
 from win_input import PostMessageBackend, key_to_vk, tap
 from discord_notify import DiscordNotifier, valid_webhook
 from secrets_store import load_secrets
@@ -169,6 +170,31 @@ def cmd_relaunch(instance_id: str, *flags: str) -> int:
     return 0 if window else 1
 
 
+def cmd_eat_test(instance_id: str) -> int:
+    """Raz wykonuje krok jedzenia z ustawień konta (bez chodzenia i kopania)."""
+    cfg = load_config()
+    account = next((a for a in cfg.accounts if a.instance_id == instance_id), None)
+    if account is None:
+        print(f"Brak konta dla instancji „{instance_id}” w config.json.")
+        return 1
+    window = _window_for(instance_id)
+    if window is None:
+        return 1
+    plan = EatPlan.from_account(account) or EatPlan.from_account(
+        __import__("dataclasses").replace(account, eat_enabled=True))
+    print(f"Slot kilofa {account.pickaxe_slot}, slot jedzenia {account.food_slot}, "
+          f"PPM przez {account.eat_seconds:g} s")
+    m = Miner(window, cfg)
+    m.eat = plan
+    m._select_pickaxe()
+    print("Kilof w ręce; za 1 s jedzenie…")
+    time.sleep(1)
+    result = m._eat()
+    m.sender.release_all()
+    print("Gotowe: " + {"done": "zjedzono (albo pełny głód)", "stopped": "przerwano", "paused": "przerwano"}[result])
+    return 0
+
+
 def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> int:
     """Kopie `mine_s` s → pauza `pause_s` s → kopie 10 s → stop. Postać RUSZA SIĘ w grze — patrz na okno."""
     cfg = load_config()
@@ -206,7 +232,7 @@ def cmd_pause_test(instance_id: str, mine_s: str = "20", pause_s: str = "5") -> 
 
 COMMANDS = {"instances": cmd_instances, "replay": cmd_replay, "tail": cmd_tail, "discord-test": cmd_discord_test,
             "pause-test": cmd_pause_test, "chat": cmd_chat, "keys": cmd_keys,
-            "relaunch": cmd_relaunch}
+            "relaunch": cmd_relaunch, "eat-test": cmd_eat_test}
 
 
 def main(argv: list[str]) -> int:

@@ -82,6 +82,7 @@ class PostMessageBackend:
         self.hwnd = hwnd
         self._held: set[int] = set()
         self._lmb = False
+        self._rmb = False
 
     def _post(self, msg: int, wparam: int, lparam: int) -> None:
         win32api.PostMessage(self.hwnd, msg, wparam, lparam)
@@ -109,6 +110,14 @@ class PostMessageBackend:
     def lmb_up(self) -> None:
         self._post(win32con.WM_LBUTTONUP, 0, self._center())
         self._lmb = False
+
+    def rmb_down(self) -> None:
+        self._post(win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, self._center())
+        self._rmb = True
+
+    def rmb_up(self) -> None:
+        self._post(win32con.WM_RBUTTONUP, 0, self._center())
+        self._rmb = False
 
     def type_text(self, text: str, delay: float = 0.01) -> None:
         """Wpisuje tekst jako WM_CHAR (gotowe znaki: polskie litery, '/', wielkie litery bez Shifta).
@@ -139,6 +148,11 @@ class PostMessageBackend:
                 self.lmb_up()
             except pywintypes.error:
                 self._lmb = False
+        if self._rmb:
+            try:
+                self.rmb_up()
+            except pywintypes.error:
+                self._rmb = False
 
 
 # Tylko jedno okno naraz może być na pierwszym planie.
@@ -153,6 +167,7 @@ class ForegroundBackend:
         self._held: set[int] = set()
         self._lmb_wanted = False
         self._lmb_pressed = False
+        self._rmb_pressed = False
         self._in_session = False
 
     def _focus(self) -> None:
@@ -206,6 +221,17 @@ class ForegroundBackend:
         if self._lmb_pressed:
             self._mouse(False)
 
+    def rmb_down(self) -> None:
+        # Prawy przycisk tylko w trakcie sesji (okno na pierwszym planie), jak klawisze.
+        if self._in_session and not self._rmb_pressed:
+            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            self._rmb_pressed = True
+
+    def rmb_up(self) -> None:
+        if self._rmb_pressed:
+            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            self._rmb_pressed = False
+
     def hold_tick(self) -> None:
         pass
 
@@ -214,6 +240,7 @@ class ForegroundBackend:
             self.key_up(vk)
         if self._lmb_pressed:
             self._mouse(False)
+        self.rmb_up()
 
     def release_all(self) -> None:
         self._lmb_wanted = False

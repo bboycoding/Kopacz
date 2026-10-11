@@ -36,6 +36,18 @@
       "wait:2",
       "ENTER"
     ],
+    "menu_key_rules": [
+      {
+        "pattern": "Internal Exception",
+        "keys": [
+          "TAB",
+          "TAB",
+          "ENTER",
+          "wait:2",
+          "ENTER"
+        ]
+      }
+    ],
     "pause_before_s": 5.0,
     "join_timeout_s": 20.0,
     "backoff_s": [
@@ -49,6 +61,11 @@
     "max_attempts_l0": 6,
     "max_attempts_l1": 5,
     "max_attempts_l2": 2,
+    "connect_timeout_s": 20.0,
+    "login_timeout_s": 45.0,
+    "close_timeout_s": 20.0,
+    "restart_timeout_s": 120.0,
+    "restart_connect_timeout_s": 90.0,
     "slow_retry": true,
     "slow_retry_min": 30.0,
     "gate_spacing_s": 10.0,
@@ -90,7 +107,12 @@
           "on_missed": "defer"
         }
       ],
-      "enabled": true
+      "enabled": true,
+      "eat_enabled": false,
+      "food_slot": 2,
+      "pickaxe_slot": 1,
+      "eat_every_cycles": 50,
+      "eat_seconds": 2.5
     }
   ]
 }

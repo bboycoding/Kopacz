@@ -20,7 +20,7 @@ from gui_tabs.advanced_tab import AdvancedTab
 from gui_tabs.discord_tab import DiscordTab
 from gui_tabs.server_tab import ServerTab
 from hotkey import GlobalHotkey
-from miner import Miner, run_action
+from miner import EatPlan, Miner, run_action
 from monitor import Monitor
 from rejoin import Rejoiner, RejoinGate
 from discord_notify import valid_webhook
@@ -744,6 +744,7 @@ class App(ctk.CTk):
         miner = Miner(window, replace(cfg))
         acc = self.account_for_instance(self.window_instance.get(window.hwnd, ""))
         miner.keep_alive_without_window = bool(acc and acc.enabled and self.cfg.rejoin.enabled)
+        miner.eat = EatPlan.from_account(acc) if acc and acc.enabled else None
         self.miners[window.hwnd] = miner
         miner.start()
         self._start_runner(window, miner)

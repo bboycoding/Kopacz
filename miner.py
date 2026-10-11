@@ -3,11 +3,12 @@ import random
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import pywintypes
 
 from config import Config
-from win_input import key_to_vk, make_sender
+from win_input import key_to_vk, make_sender, tap
 from windows import McWindow, is_alive
 
 HOLD_TICK = 0.25  # co ile sekund podtrzymywać trzymany klawisz (i sprawdzać stop/pauzę)
@@ -36,6 +37,22 @@ def _hold(sender, vk: int, duration: float, stop_event: threading.Event,
             sender.key_up(vk)
 
 
+@dataclass(frozen=True)
+class EatPlan:
+    """Jedzenie co N cykli: klawisz slotu jedzenia, PPM przez `seconds`, powrót na slot kilofa."""
+    food_vk: int
+    pickaxe_vk: int
+    every_cycles: int
+    seconds: float
+
+    @classmethod
+    def from_account(cls, acc) -> "EatPlan | None":
+        if not acc.eat_enabled:
+            return None
+        return cls(key_to_vk(str(acc.food_slot)), key_to_vk(str(acc.pickaxe_slot)),
+                   max(1, acc.eat_every_cycles), acc.eat_seconds)
+
+
 class Miner(threading.Thread):
     def __init__(self, window: McWindow, cfg: Config):
         super().__init__(daemon=True)
@@ -51,6 +68,8 @@ class Miner(threading.Thread):
         self.note: str | None = None            # komunikat z zewnątrz (np. „Odzyskiwanie”); GUI pokazuje go zamiast statusu
         # Gdy True, zniknięcie okna gry (crash, restart instancji) nie kończy wątku: kopacz czeka na rebind().
         self.keep_alive_without_window = False
+        self.eat: EatPlan | None = None         # ustawia App z konfiguracji konta, przed start()
+        self.meals = 0
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -120,9 +139,42 @@ class Miner(threading.Thread):
                     return False
         finally:
             self._paused_ack.clear()
+        self._select_pickaxe()
         self.sender.lmb_down()
         self.status = "Kopie"
         return True
+
+    # ---------- jedzenie ----------
+
+    def _select_pickaxe(self) -> None:
+        """Przełącza na slot z kilofem (gdy jedzenie jest ustawione — tylko wtedy znamy ten slot)."""
+        if self.eat:
+            with self.sender.session():
+                tap(self.sender, self.eat.pickaxe_vk)
+
+    def _eat(self) -> str:
+        """Puść LPM → slot jedzenia → PPM przez czas jedzenia → puść → slot kilofa → LPM.
+        Stop i pauza przerywają jedzenie; PPM jest zawsze puszczany. Zwraca DONE / STOPPED / PAUSED."""
+        e = self.eat
+        s = self.sender
+        self.status = "Je"
+        s.lmb_up()
+        result = DONE
+        with s.session():
+            try:
+                tap(s, e.food_vk)
+                result = self._wait(0.2)            # gra potrzebuje chwili na zmianę przedmiotu w ręce
+                if result == DONE:
+                    s.rmb_down()
+                    result = self._wait(e.seconds)
+            finally:
+                s.rmb_up()
+                tap(s, e.pickaxe_vk)
+        if result == DONE:
+            self.meals += 1
+            s.lmb_down()
+            self.status = "Kopie"
+        return result
 
     def _wait(self, seconds: float) -> str:
         """Pauza na zawrotce, przerywana stopem lub prośbą o wstrzymanie."""
@@ -151,6 +203,7 @@ class Miner(threading.Thread):
         try:
             right, left = key_to_vk(c.key_right), key_to_vk(c.key_left)
             self.status = "Kopie"
+            self._select_pickaxe()
             self.sender.lmb_down()
             while not self._stop_event.is_set():
                 try:
@@ -167,7 +220,7 @@ class Miner(threading.Thread):
             self.sender.release_all()
             self._paused_ack.set()      # nikt nie czeka na pauzę kopacza, którego już nie ma
             self.note = None
-            if self.status in ("Kopie", "Wstrzymany"):
+            if self.status in ("Kopie", "Wstrzymany", "Je"):
                 self.status = "Zatrzymany"
 
     def _run_cycle(self, c: Config, right: int, left: int) -> bool:
@@ -191,6 +244,9 @@ class Miner(threading.Thread):
                 # Po wznowieniu zaczynamy cykl od nowa (od ruchu w prawo); niepełny cykl się nie liczy.
                 return True
         self.cycles += 1
+        if self.eat and self.cycles % self.eat.every_cycles == 0:
+            # Postać stoi przy ścianie po zawrotce — dobry moment na jedzenie.
+            return self._eat() != STOPPED
         if c.lmb_refresh_cycles and self.cycles % c.lmb_refresh_cycles == 0:
             self.sender.lmb_up()
             time.sleep(0.05)

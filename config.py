@@ -57,6 +57,12 @@ class AccountCfg:
     after_join_commands: list[str] = field(default_factory=list)
     schedule: list[ChatCommand] = field(default_factory=list)
     enabled: bool = True
+    # Jedzenie: co N cykli bot przełącza na slot z jedzeniem, trzyma PPM i wraca na slot z kilofem.
+    eat_enabled: bool = False
+    food_slot: int = 2              # 1–9 (klawisze paska szybkiego wyboru)
+    pickaxe_slot: int = 1
+    eat_every_cycles: int = 50
+    eat_seconds: float = 2.5        # jedzenie w grze trwa 1,6 s; zapas na lagi
 
 
 @dataclass
@@ -174,6 +180,14 @@ class Config:
                 raise ValueError(f"Konto „{a.name}”: nieznany profil serwera „{a.server_id}”.")
             if "{password}" in "".join([a.home_command, *a.after_join_commands]):
                 raise ValueError(f"Konto „{a.name}”: {{password}} wolno użyć tylko w komendzie logowania.")
+            if not (1 <= a.food_slot <= 9 and 1 <= a.pickaxe_slot <= 9):
+                raise ValueError(f"Konto „{a.name}”: sloty jedzenia i kilofa muszą być w zakresie 1–9.")
+            if a.eat_enabled and a.food_slot == a.pickaxe_slot:
+                raise ValueError(f"Konto „{a.name}”: jedzenie i kilof nie mogą być w tym samym slocie.")
+            if not 1 <= a.eat_every_cycles <= 100000:
+                raise ValueError(f"Konto „{a.name}”: jedzenie co 1–100000 cykli.")
+            if not 0.5 <= a.eat_seconds <= 15:
+                raise ValueError(f"Konto „{a.name}”: czas jedzenia musi być w zakresie 0,5–15 s.")
             for c in a.schedule:
                 if not c.text.strip():
                     raise ValueError(f"Konto „{a.name}”: pusta komenda w harmonogramie.")

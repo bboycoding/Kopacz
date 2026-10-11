@@ -171,6 +171,15 @@ W oknie konta, sekcja **Harmonogram komend na czacie**: wpisz komendę, co ile m
 - **Gdy przegapiona:** jeśli termin minie, kiedy konto nie kopało (np. trwał powrót na serwer), **Odłóż** wysyła komendę raz po powrocie (po 60 s nieprzerwanego kopania, bez nadrabiania zaległości), a **Pomiń** czeka na kolejny termin.
 - Limit gry to 256 znaków. Po otwarciu czatu program naciska jeszcze Backspace, żeby usunąć ewentualną zbędną literę „t”.
 
+### 8.3a Jedzenie
+
+W oknie konta, sekcja **Jedzenie**: zaznacz „Jedz co określoną liczbę cykli” i wpisz slot jedzenia (1–9), slot kilofa (1–9), co ile cykli jeść i jak długo trzymać prawy przycisk myszy (domyślnie 2,5 s; samo jedzenie w grze trwa 1,6 s).
+
+- Na końcu co N-tego cyklu, gdy postać stoi przy ścianie, bot puszcza LPM, przełącza na slot z jedzeniem, trzyma PPM, wraca na slot z kilofem i kopie dalej. W wierszu konta widać wtedy status **JE**.
+- Przy starcie kopania i po każdej pauzie bot sam bierze kilof do ręki.
+- W slocie jedzenia **nie trzymaj bloków** — PPM by je postawił. Przy pełnym pasku głodu gra nie pozwala jeść, więc nic się nie stanie.
+- Sprawdź ustawienia na jednym koncie: `python devtools.py eat-test <instancja>` (bez chodzenia: kilof → jedzenie → kilof).
+
 ### 8.4 Powrót na serwer
 
 Włącz w **Zaawansowane → Powrót na serwer** (zaznacz pole, **Zapisz**). Obowiązuje od następnego startu kopania na koncie. Potrzebujesz: konta przypisanego do instancji, profilu serwera z komendami lobby i wzorcami, hasła konta (jeśli serwer wymaga logowania) i, dla restartu gry, ustawionego launchera.
@@ -215,6 +224,7 @@ W folderze z kodem (`python devtools.py …`):
 | `chat <instancja> "<tekst>"` | Wpisuje tekst lub komendę na czacie okna (prawdziwa wysyłka) |
 | `keys <instancja> KLAWISZ…` | Naciska klawisze w oknie, np. `TAB ENTER wait:2 ENTER` |
 | `pause-test <instancja>` | Kopanie → pauza → wznowienie → stop na prawdziwym oknie |
+| `eat-test <instancja>` | Raz wykonuje jedzenie z ustawień konta (kilof → jedzenie → kilof) |
 | `relaunch <instancja> [--yes]` | Restart jednej instancji; bez `--yes` tylko pokazuje, co by zrobił |
 
 ## Najczęstsze problemy
