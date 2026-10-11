@@ -24,6 +24,9 @@ VANILLA = ServerProfile(
     address="",
     login_command="",
     lobby_commands=[],
+    # Zwykły serwer (np. Aternos): po wejściu serwer ogłasza „<nick> joined the game”; ban to powód rozłączenia.
+    pat_in_game=r"joined the game",
+    pat_ban=r"(?i)you are banned",
 )
 
 PRESETS = {"bfsmc": BFSMC, "vanilla": VANILLA}

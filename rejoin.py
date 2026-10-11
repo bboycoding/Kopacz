@@ -353,9 +353,11 @@ class Rejoiner:
         if res == W.DISCONNECTED:
             return "timeout"
         if res == W.CONNECTING and not self._address_ok(self._last_text):
-            self.emit(f"⚠ gra łączy z innym serwerem niż profil ({self._last_text}); anuluję")
-            self._cancel_connecting()
-            return "timeout"
+            # Tylko ostrzeżenie: gra wpisuje adres PO rozwiązaniu rekordu SRV (np. bfsmc.pl → mc.bfsmc.pl,
+            # nazwa.aternos.me → host Aternosa), więc różnica nie oznacza złego serwera. O sukcesie
+            # decydują wzorce logowania/lobby/wejścia do gry. Esc tu nie wolno: gdy gra zdążyła już
+            # wejść na serwer, otwiera menu pauzy i blokuje logowanie.
+            self.emit(f"ℹ gra łączy z adresem innym niż w profilu ({self._last_text}); sprawdzam dalej")
         if res in (W.IN_GAME, W.LOBBY, W.BAN, "stop"):
             return res
 
@@ -428,18 +430,18 @@ class Rejoiner:
         return self._join_phase(max(r.connect_timeout_s, r.restart_connect_timeout_s))
 
     def _address_ok(self, text: str) -> bool:
-        """„Connecting to bfsmc.pl, 25565”: adres musi zgadzać się z profilem (puste = nie sprawdzamy)."""
-        address = (self.profile.address if self.profile else "").strip().lower()
+        """„Connecting to mc.bfsmc.pl, 25565” a adres profilu „bfsmc.pl”: ten sam host, subdomena albo
+        ta sama domena (dwie ostatnie części nazwy) = zgodne. Puste w profilu = nie sprawdzamy."""
+        address = (self.profile.address if self.profile else "").strip().lower().split(":")[0].rstrip(".")
         if not address:
             return True
-        host = text.lower().removeprefix("connecting to ").split(",")[0].strip()
-        return host == address.split(":")[0]
-
-    def _cancel_connecting(self) -> None:
-        try:
-            self.menu_factory(self.hwnd, self.stop).run(["ESCAPE"])
-        except (ChatError, ChatAborted):
-            pass
+        host = text.lower().removeprefix("connecting to ").split(",")[0].strip().rstrip(".")
+        if host == address or host.endswith("." + address) or address.endswith("." + host):
+            return True
+        parts_h, parts_a = host.split("."), address.split(".")
+        if parts_h[-1].isdigit() or parts_a[-1].isdigit():      # adresy IP: tylko dokładna zgodność
+            return False
+        return len(parts_h) >= 2 and parts_h[-2:] == parts_a[-2:]
 
     def _send_login(self) -> str:
         """Wpisuje komendę logowania z hasłem konta. Hasło nigdy nie trafia do komunikatów."""

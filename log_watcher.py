@@ -80,7 +80,11 @@ def classify(raw: str, profile=None) -> LogEvent | None:
         return LogEvent(CONNECTING, msg, raw, ts)
     d = DISCONNECT_RE.match(msg)
     if d:
-        return LogEvent(DISCONNECTED, d.group(1).strip() or "brak powodu", raw, ts)
+        reason = d.group(1).strip() or "brak powodu"
+        # Ban zwykle przychodzi jako powód rozłączenia („You are banned…”), nie jako linia czatu.
+        if profile is not None and profile.pat_ban and _rx(profile.pat_ban).search(reason):
+            return LogEvent(BAN, reason, raw, ts)
+        return LogEvent(DISCONNECTED, reason, raw, ts)
     if msg == "Stopping!":
         return LogEvent(STOPPING, msg, raw, ts)
     return LogEvent(LOG, msg, raw, ts)
